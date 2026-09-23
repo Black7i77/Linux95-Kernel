@@ -14,6 +14,7 @@
 #include "memory/self_test.hpp"
 #include "memory/virtual.hpp"
 #include "panic/panic.hpp"
+#include "storage/storage_self_test.hpp"
 #include "terminal/shell.hpp"
 #include "terminal/vga.hpp"
 
@@ -104,6 +105,11 @@ extern "C" [[noreturn]] void linux95_higher_half_entry(
     }
     debug::write("[PASS] memory_self_test\n");
 
+    if (!storage::self_test::run()) {
+        debug::write("[PANIC] storage_self_test\n");
+        panic::halt("Storage self-test failed");
+    }
+
     if (!heap::initialize(memory::heap_start(), memory::heap_end())) {
         panic::halt("Could not initialize kernel heap");
     }
@@ -117,11 +123,12 @@ extern "C" [[noreturn]] void linux95_higher_half_entry(
     io::enable_interrupts();
 
     vga::set_color(10, 0);
-    vga::write("Linux95 Kernel v1.0 Memory Foundation\n");
+    vga::write("Linux95 Kernel v1.0 Storage Foundation\n");
     vga::set_color(7, 0);
     vga::write("Architecture: x86_64 higher-half\n");
     vga::write("Bootloader: Linux95 BIOS Loader\n");
     vga::write("Memory: HHDM + 4 KiB page allocator/VM\n");
+    vga::write("Storage: ATA PIO + LBA28 (boot disk read-only)\n");
     vga::set_color(10, 0);
     vga::write("Status: ONLINE\n\n");
     vga::set_color(7, 0);

@@ -15,6 +15,7 @@ STAGE2_SECTORS := 16
 KERNEL_LBA := 17
 KERNEL_SECTORS := 128
 IMAGE_SECTORS := 145
+STORAGE_TEST_IMAGE := $(BUILD)/linux95-storage-test.img
 
 HOST_CXXFLAGS := -std=c++17 -Wall -Wextra -Werror -O2 -Ikernel
 
@@ -58,9 +59,12 @@ KERNEL_OBJS := \
 	$(BUILD)/paging.o \
 	$(BUILD)/self_test.o \
 	$(BUILD)/heap.o \
+	$(BUILD)/ata.o \
+	$(BUILD)/disk.o \
+	$(BUILD)/storage_self_test.o \
 	$(BUILD)/shell.o
 
-.PHONY: all clean run run-debug test test-qemu test-host-memory test-memory-source test-relocations check-tools
+.PHONY: all clean run run-debug test test-qemu prepare-storage-test-image test-host-memory test-host-storage test-memory-source test-storage-source test-relocations check-tools
 
 all: check-tools $(BUILD)/linux95-kernel.img
 
@@ -148,7 +152,22 @@ test-host-memory: $(BUILD)/host-page-bitmap-test $(BUILD)/host-e820-limit-test
 >$(BUILD)/host-page-bitmap-test
 >$(BUILD)/host-e820-limit-test
 
+$(BUILD)/host-ata-helpers-test: tests/host/ata_helpers_test.cpp | $(BUILD)
+>$(CXX) $(HOST_CXXFLAGS) $< -o $@
+
+test-host-storage: $(BUILD)/host-ata-helpers-test
+>$(BUILD)/host-ata-helpers-test
+
 $(BUILD)/heap.o: kernel/memory/heap.cpp kernel/memory/heap.hpp | $(BUILD)
+>$(CXX) $(CXXFLAGS) -c $< -o $@
+
+$(BUILD)/ata.o: kernel/storage/ata.cpp kernel/storage/ata.hpp kernel/storage/ata_helpers.hpp kernel/arch/io.hpp | $(BUILD)
+>$(CXX) $(CXXFLAGS) -c $< -o $@
+
+$(BUILD)/disk.o: kernel/storage/disk.cpp kernel/storage/disk.hpp kernel/storage/ata.hpp | $(BUILD)
+>$(CXX) $(CXXFLAGS) -c $< -o $@
+
+$(BUILD)/storage_self_test.o: kernel/storage/storage_self_test.cpp kernel/storage/storage_self_test.hpp kernel/storage/disk.hpp kernel/storage/ata_helpers.hpp kernel/arch/debug.hpp | $(BUILD)
 >$(CXX) $(CXXFLAGS) -c $< -o $@
 
 $(BUILD)/shell.o: kernel/terminal/shell.cpp kernel/terminal/shell.hpp | $(BUILD)
@@ -185,8 +204,15 @@ $(BUILD)/linux95-kernel.img: \
 >dd if=$(BUILD)/stage2.bin of=$@ bs=$(SECTOR) seek=1 conv=notrunc status=none
 >dd if=$(BUILD)/kernel.bin of=$@ bs=$(SECTOR) seek=$(KERNEL_LBA) conv=notrunc status=none
 >@echo
->@echo "Linux95 Kernel v1.0 Memory Foundation image built:"
+>@echo "Linux95 Kernel v1.0 Storage Foundation image built:"
 >@ls -lh $@
+
+$(STORAGE_TEST_IMAGE): | $(BUILD)
+>dd if=/dev/zero of=$@ bs=1M count=16 status=none
+
+prepare-storage-test-image: | $(BUILD)
+>rm -f $(STORAGE_TEST_IMAGE)
+>dd if=/dev/zero of=$(STORAGE_TEST_IMAGE) bs=1M count=16 status=none
 
 test-memory-source:
 >$(PYTHON) tests/memory_source_checks.py
@@ -194,27 +220,35 @@ test-memory-source:
 test-relocations: all
 >$(PYTHON) tests/relocation_checks.py
 
-test: all test-host-memory
+test-storage-source:
+>$(PYTHON) tests/storage_source_checks.py
+
+test: all test-host-memory test-host-storage
 >$(PYTHON) tests/source_checks.py
 >$(PYTHON) tests/image_checks.py
 >$(PYTHON) tests/memory_source_checks.py
+>$(PYTHON) tests/storage_source_checks.py
 >$(PYTHON) tests/relocation_checks.py
 
-test-qemu: all
+test-qemu: all prepare-storage-test-image
 >@command -v $(QEMU) >/dev/null || { echo "Missing tool: $(QEMU)"; exit 1; }
 >$(PYTHON) tests/qemu_smoke.py
 
-run: all
+run: all prepare-storage-test-image
 >$(QEMU) \
 	-machine pc \
 	-m 128M \
-	-drive format=raw,file=$(BUILD)/linux95-kernel.img
+	-boot c \
+	-drive if=ide,index=0,media=disk,format=raw,file=$(BUILD)/linux95-kernel.img \
+	-drive if=ide,index=1,media=disk,format=raw,file=$(STORAGE_TEST_IMAGE)
 
-run-debug: all
+run-debug: all prepare-storage-test-image
 >$(QEMU) \
 	-machine pc \
 	-m 128M \
-	-drive format=raw,file=$(BUILD)/linux95-kernel.img \
+	-boot c \
+	-drive if=ide,index=0,media=disk,format=raw,file=$(BUILD)/linux95-kernel.img \
+	-drive if=ide,index=1,media=disk,format=raw,file=$(STORAGE_TEST_IMAGE) \
 	-no-reboot \
 	-no-shutdown
 

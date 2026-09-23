@@ -1,0 +1,52 @@
+name: Linux95 CI
+
+on:
+  push:
+    branches:
+      - v1.0-dev
+      - v1.0-storage-dev
+  pull_request:
+    branches:
+      - v1.0-dev
+
+permissions:
+  contents: read
+
+concurrency:
+  group: linux95-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: Build and test Linux95
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Install build and QEMU tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            nasm \
+            binutils \
+            qemu-system-x86 \
+            python3
+
+      - name: Clean
+        run: make clean
+
+      - name: Build kernel
+        run: make
+
+      - name: Run host and source tests
+        run: make test
+
+      - name: Run QEMU boot and storage tests
+        run: make test-qemu
+
+      - name: Check whitespace
+        run: git diff --check
