@@ -95,3 +95,7 @@ This is still a small standalone experimental kernel. This milestone does **not*
 FAT/filesystem support is the next storage milestone after the ATA foundation is verified.
 
 It is not Linux ABI compatible and is separate from the Debian-based Linux95 distribution.
+
+## License
+
+Linux95 Kernel is released under the MIT License. See [`LICENSE`](LICENSE).
