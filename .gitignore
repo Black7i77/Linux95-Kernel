@@ -2,3 +2,6 @@ build/
 *.o
 *.elf
 *.bin
+
+.v0.1-backup/
+linux95-kernel-v0.2-apply.sh
