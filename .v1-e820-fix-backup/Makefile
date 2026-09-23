@@ -137,16 +137,11 @@ $(BUILD)/paging.o: kernel/memory/paging.cpp kernel/memory/paging.hpp kernel/memo
 $(BUILD)/self_test.o: kernel/memory/self_test.cpp kernel/memory/self_test.hpp kernel/memory/paging.hpp kernel/memory/physical.hpp kernel/memory/address.hpp | $(BUILD)
 >$(CXX) $(CXXFLAGS) -c $< -o $@
 
-
-$(BUILD)/host-e820-limit-test: tests/host/e820_limit_test.cpp kernel/memory/memory.cpp kernel/memory/memory.hpp kernel/boot_info.hpp | $(BUILD)
->$(CXX) $(HOST_CXXFLAGS) tests/host/e820_limit_test.cpp kernel/memory/memory.cpp -o $@
-
 $(BUILD)/host-page-bitmap-test: tests/host/page_bitmap_test.cpp kernel/memory/page_bitmap.hpp kernel/memory/address.hpp | $(BUILD)
 >$(CXX) $(HOST_CXXFLAGS) $< -o $@
 
-test-host-memory: $(BUILD)/host-page-bitmap-test $(BUILD)/host-e820-limit-test
+test-host-memory: $(BUILD)/host-page-bitmap-test
 >$(BUILD)/host-page-bitmap-test
->$(BUILD)/host-e820-limit-test
 
 $(BUILD)/heap.o: kernel/memory/heap.cpp kernel/memory/heap.hpp | $(BUILD)
 >$(CXX) $(CXXFLAGS) -c $< -o $@

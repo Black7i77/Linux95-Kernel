@@ -3,8 +3,11 @@
 #include "arch/io.hpp"
 #include "arch/keyboard.hpp"
 #include "arch/pit.hpp"
+#include "arch/x86_64/control_regs.hpp"
+#include "memory/address.hpp"
 #include "memory/heap.hpp"
 #include "memory/memory.hpp"
+#include "memory/physical.hpp"
 #include "terminal/vga.hpp"
 
 #include <stddef.h>
@@ -18,14 +21,10 @@ constexpr size_t kCommandCapacity = 64;
 bool equals(const char* a, const char* b)
 {
     while (*a != '\0' && *b != '\0') {
-        if (*a != *b) {
-            return false;
-        }
-
+        if (*a != *b) return false;
         ++a;
         ++b;
     }
-
     return *a == '\0' && *b == '\0';
 }
 
@@ -39,9 +38,9 @@ void prompt()
 
 void print_version()
 {
-    vga::write("Linux95 Kernel v0.2 Interactive\n");
-    vga::write("Architecture: x86_64\n");
-    vga::write("Kernel: freestanding C++\n");
+    vga::write("Linux95 Kernel v1.0 Memory Foundation\n");
+    vga::write("Architecture: x86_64 higher-half\n");
+    vga::write("Kernel: freestanding C++17\n");
 }
 
 void print_help()
@@ -69,6 +68,26 @@ void print_memory()
     vga::write_uint(memory::usable_regions());
     vga::put_char('\n');
 
+    vga::write("Physical pages: total=");
+    vga::write_uint(memory::physical::total_pages());
+    vga::write(" used=");
+    vga::write_uint(memory::physical::used_pages());
+    vga::write(" free=");
+    vga::write_uint(memory::physical::free_pages());
+    vga::put_char('\n');
+
+    vga::write("Page size: ");
+    vga::write_uint(memory::kPageSize);
+    vga::write(" bytes\n");
+
+    vga::write("HHDM base: ");
+    vga::write_hex(memory::kHhdmBase);
+    vga::put_char('\n');
+
+    vga::write("CR3: ");
+    vga::write_hex(arch::x86_64::read_cr3());
+    vga::put_char('\n');
+
     vga::write("Heap used: ");
     vga::write_uint(heap::used_bytes() / 1024u);
     vga::write(" KiB / ");
@@ -79,65 +98,33 @@ void print_memory()
 void reboot()
 {
     vga::write("Rebooting...\n");
-
     constexpr uint32_t kWaitLimit = 1000000u;
-
     for (uint32_t i = 0; i < kWaitLimit; ++i) {
         if ((io::inb(0x64) & 0x02u) == 0) {
             io::outb(0x64, 0xFE);
-
-            for (uint32_t spin = 0; spin < kWaitLimit; ++spin) {
-                io::pause();
-            }
-
+            for (uint32_t spin = 0; spin < kWaitLimit; ++spin) io::pause();
             vga::write("Reboot request did not reset the system.\n");
             return;
         }
-
         io::pause();
     }
-
     vga::write("Keyboard controller stayed busy; reboot cancelled.\n");
 }
 
 void execute(const char* command)
 {
-    if (command[0] == '\0') {
-        return;
-    }
-
-    if (equals(command, "help")) {
-        print_help();
-        return;
-    }
-
-    if (equals(command, "clear")) {
-        vga::clear();
-        return;
-    }
-
-    if (equals(command, "version")) {
-        print_version();
-        return;
-    }
-
-    if (equals(command, "mem")) {
-        print_memory();
-        return;
-    }
-
+    if (command[0] == '\0') return;
+    if (equals(command, "help")) { print_help(); return; }
+    if (equals(command, "clear")) { vga::clear(); return; }
+    if (equals(command, "version")) { print_version(); return; }
+    if (equals(command, "mem")) { print_memory(); return; }
     if (equals(command, "uptime")) {
         vga::write("Uptime: ");
         vga::write_uint(pit::uptime_seconds());
         vga::write(" seconds\n");
         return;
     }
-
-    if (equals(command, "reboot")) {
-        reboot();
-        return;
-    }
-
+    if (equals(command, "reboot")) { reboot(); return; }
     vga::write("Unknown command: ");
     vga::write(command);
     vga::write("\nType 'help' for commands.\n");
@@ -149,7 +136,6 @@ void execute(const char* command)
 {
     char command[kCommandCapacity];
     size_t length = 0;
-
     prompt();
 
     for (;;) {
@@ -159,7 +145,6 @@ void execute(const char* command)
         }
 
         const char c = keyboard::read_char();
-
         if (c == '\n') {
             vga::put_char('\n');
             command[length] = '\0';
@@ -168,7 +153,6 @@ void execute(const char* command)
             prompt();
             continue;
         }
-
         if (c == '\b') {
             if (length > 0) {
                 --length;
@@ -176,12 +160,9 @@ void execute(const char* command)
             }
             continue;
         }
-
-        if (c >= 32 && c <= 126) {
-            if (length + 1 < kCommandCapacity) {
-                command[length++] = c;
-                vga::put_char(c);
-            }
+        if (c >= 32 && c <= 126 && length + 1 < kCommandCapacity) {
+            command[length++] = c;
+            vga::put_char(c);
         }
     }
 }

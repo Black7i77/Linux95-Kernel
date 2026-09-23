@@ -1,7 +1,7 @@
 # Linux95 Kernel v1.0 Memory Foundation Design
 
-Date: 2026-09-23  
-Branch: `v1.0-dev`  
+Date: 2026-09-23
+Branch: `v1.0-dev`
 Base: Linux95 Kernel v0.2 Interactive (`v0.2.0`)
 
 ## 1. Goal

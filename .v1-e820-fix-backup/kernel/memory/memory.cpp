@@ -66,37 +66,6 @@ uint64_t maximum_physical_address(const BootInfo& boot_info)
     return maximum;
 }
 
-
-uint64_t maximum_usable_physical_address(const BootInfo& boot_info)
-{
-    if (boot_info.e820_count == 0 ||
-        boot_info.e820_count > kMaxE820Entries ||
-        boot_info.e820_address == 0) {
-        return 0;
-    }
-
-    const auto* entries =
-        reinterpret_cast<const E820Entry*>(
-            static_cast<uintptr_t>(boot_info.e820_address));
-
-    uint64_t maximum = 0;
-
-    for (uint32_t i = 0; i < boot_info.e820_count; ++i) {
-        const E820Entry& entry = entries[i];
-
-        if (entry.type != 1 || entry.length == 0) {
-            continue;
-        }
-
-        const uint64_t end = saturating_add(entry.base, entry.length);
-        if (end > maximum) {
-            maximum = end;
-        }
-    }
-
-    return maximum;
-}
-
 bool initialize(const BootInfo& boot_info)
 {
     g_total_bytes = 0;

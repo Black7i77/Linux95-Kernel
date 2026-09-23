@@ -96,7 +96,14 @@ if "[PANIC]" in content:
     sys.exit(1)
 
 required = [
-    "[BOOT] kernel_entry",
+    "[BOOT] low_kernel_entry",
+    "[PASS] bootstrap_tables_created",
+    "[PASS] cr3_reloaded",
+    "[PASS] higher_half_entry",
+    "[PASS] hhdm_online",
+    "[PASS] physical_allocator_online",
+    "[PASS] virtual_memory_online",
+    "[PASS] memory_self_test",
     "[PASS] shell_ready",
 ]
 
@@ -104,6 +111,8 @@ missing = [marker for marker in required if marker not in content]
 
 if missing:
     print("qemu smoke test: FAIL")
+    seen = [marker for marker in required if marker in content]
+    print("last checkpoint:", seen[-1] if seen else "(none)")
     print("missing markers:")
     for marker in missing:
         print(f"  {marker}")
