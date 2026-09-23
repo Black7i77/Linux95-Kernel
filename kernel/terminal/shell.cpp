@@ -8,6 +8,7 @@
 #include "memory/heap.hpp"
 #include "memory/memory.hpp"
 #include "memory/physical.hpp"
+#include "storage/disk.hpp"
 #include "terminal/vga.hpp"
 
 #include <stddef.h>
@@ -38,7 +39,7 @@ void prompt()
 
 void print_version()
 {
-    vga::write("Linux95 Kernel v1.0 Memory Foundation\n");
+    vga::write("Linux95 Kernel v1.0 Storage Foundation\n");
     vga::write("Architecture: x86_64 higher-half\n");
     vga::write("Kernel: freestanding C++17\n");
 }
@@ -50,6 +51,7 @@ void print_help()
     vga::write("  clear    Clear the screen\n");
     vga::write("  version  Show kernel version\n");
     vga::write("  mem      Show memory statistics\n");
+    vga::write("  diskinfo Show ATA disk information\n");
     vga::write("  uptime   Show uptime in seconds\n");
     vga::write("  reboot   Reboot the machine\n");
 }
@@ -95,6 +97,34 @@ void print_memory()
     vga::write(" KiB\n");
 }
 
+
+void print_disk(const char* label, storage::DiskId id, bool writable)
+{
+    const storage::ata::DeviceInfo& device = storage::info(id);
+
+    vga::write(label);
+    vga::write(":\n");
+    vga::write("  Present: ");
+    vga::write(device.present ? "yes\n" : "no\n");
+    vga::write("  Interface: ATA PIO\n");
+    vga::write("  Mode: LBA28\n");
+    vga::write("  Model: ");
+    vga::write(device.present && device.model[0] != '\0' ? device.model : "(none)");
+    vga::put_char('\n');
+    vga::write("  Sectors: ");
+    vga::write_uint(device.lba28_sector_count);
+    vga::put_char('\n');
+    vga::write("  Writable: ");
+    vga::write(writable ? "yes\n" : "no\n");
+}
+
+void print_diskinfo()
+{
+    print_disk("Boot disk", storage::DiskId::Boot, false);
+    vga::put_char('\n');
+    print_disk("Test disk", storage::DiskId::Test, true);
+}
+
 void reboot()
 {
     vga::write("Rebooting...\n");
@@ -118,6 +148,7 @@ void execute(const char* command)
     if (equals(command, "clear")) { vga::clear(); return; }
     if (equals(command, "version")) { print_version(); return; }
     if (equals(command, "mem")) { print_memory(); return; }
+    if (equals(command, "diskinfo")) { print_diskinfo(); return; }
     if (equals(command, "uptime")) {
         vga::write("Uptime: ");
         vga::write_uint(pit::uptime_seconds());

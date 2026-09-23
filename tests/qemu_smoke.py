@@ -8,6 +8,7 @@ import time
 
 ROOT = Path(__file__).resolve().parents[1]
 IMAGE = ROOT / "build" / "linux95-kernel.img"
+STORAGE_IMAGE = ROOT / "build" / "linux95-storage-test.img"
 LOG = ROOT / "build" / "qemu-debug.log"
 
 QEMU = shutil.which("qemu-system-x86_64")
@@ -22,14 +23,20 @@ if not IMAGE.is_file():
     print(f"missing image: {IMAGE}")
     sys.exit(1)
 
+if not STORAGE_IMAGE.is_file():
+    print("qemu smoke test: FAIL")
+    print(f"missing storage test image: {STORAGE_IMAGE}")
+    sys.exit(1)
+
 LOG.unlink(missing_ok=True)
 
 cmd = [
     QEMU,
     "-machine", "pc",
     "-m", "128M",
-    "-drive", f"format=raw,file={IMAGE}",
     "-boot", "c",
+    "-drive", f"if=ide,index=0,media=disk,format=raw,file={IMAGE}",
+    "-drive", f"if=ide,index=1,media=disk,format=raw,file={STORAGE_IMAGE}",
     "-display", "none",
     "-serial", "none",
     "-monitor", "none",
@@ -46,7 +53,7 @@ proc = subprocess.Popen(
     text=True,
 )
 
-deadline = time.monotonic() + 8.0
+deadline = time.monotonic() + 12.0
 saw_shell = False
 early_exit = None
 
@@ -104,6 +111,13 @@ required = [
     "[PASS] physical_allocator_online",
     "[PASS] virtual_memory_online",
     "[PASS] memory_self_test",
+    "[PASS] ata_master_identify",
+    "[PASS] ata_slave_identify",
+    "[PASS] ata_read",
+    "[PASS] ata_write",
+    "[PASS] ata_restore",
+    "[PASS] master_write_guard",
+    "[PASS] storage_self_test",
     "[PASS] shell_ready",
 ]
 

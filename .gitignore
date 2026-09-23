@@ -12,3 +12,4 @@ __pycache__/
 
 # Local development backups
 .v1-*-backup/
+kernel/storage/*.backup-*
