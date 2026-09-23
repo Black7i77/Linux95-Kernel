@@ -9,3 +9,6 @@ linux95-kernel-v0.2-apply.sh
 # Python test cache
 __pycache__/
 *.pyc
+
+# Local development backups
+.v1-*-backup/
