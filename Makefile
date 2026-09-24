@@ -53,6 +53,8 @@ KERNEL_OBJS := \
 	$(BUILD)/pic.o \
 	$(BUILD)/pit.o \
 	$(BUILD)/keyboard.o \
+	$(BUILD)/ps2.o \
+	$(BUILD)/mouse.o \
 	$(BUILD)/memory.o \
 	$(BUILD)/virtual.o \
 	$(BUILD)/physical.o \
@@ -140,6 +142,13 @@ $(BUILD)/pit.o: kernel/arch/pit.cpp kernel/arch/pit.hpp | $(BUILD)
 
 $(BUILD)/keyboard.o: kernel/arch/keyboard.cpp kernel/arch/keyboard.hpp | $(BUILD)
 >$(CXX) $(CXXFLAGS) -c $< -o $@
+
+$(BUILD)/ps2.o: kernel/arch/ps2.cpp kernel/arch/ps2.hpp kernel/arch/io.hpp | $(BUILD)
+>$(CXX) $(CXXFLAGS) -c $< -o $@
+
+$(BUILD)/mouse.o: kernel/arch/mouse.cpp kernel/arch/mouse.hpp kernel/arch/mouse_helpers.hpp kernel/arch/ps2.hpp kernel/arch/io.hpp | $(BUILD)
+>$(CXX) $(CXXFLAGS) -c $< -o $@
+
 
 $(BUILD)/memory.o: kernel/memory/memory.cpp kernel/memory/memory.hpp kernel/boot_info.hpp | $(BUILD)
 >$(CXX) $(CXXFLAGS) -c $< -o $@
@@ -337,3 +346,13 @@ test-host-renderer: $(BUILD)/host-renderer-test
 
 .PHONY: test-host-renderer
 test-host-graphics: test-host-renderer
+
+.PHONY: test-host-mouse-helpers
+
+$(BUILD)/host-mouse-helpers-test: tests/host/mouse_helpers_test.cpp kernel/arch/mouse_helpers.hpp | $(BUILD)
+>$(CXX) $(HOST_CXXFLAGS) $< -o $@
+
+test-host-mouse-helpers: $(BUILD)/host-mouse-helpers-test
+>$(BUILD)/host-mouse-helpers-test
+
+test-host-graphics: test-host-mouse-helpers
