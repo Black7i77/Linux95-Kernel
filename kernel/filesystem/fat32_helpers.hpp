@@ -251,4 +251,138 @@ inline bool valid_path_component(
     return true;
 }
 
+
+struct BpbGeometry {
+    uint16_t bytes_per_sector;
+    uint8_t sectors_per_cluster;
+    uint16_t reserved_sectors;
+    uint8_t fat_count;
+    uint32_t total_sectors;
+    uint32_t sectors_per_fat;
+    uint32_t root_cluster;
+    uint32_t fat_begin_lba;
+    uint32_t first_data_lba;
+    uint32_t cluster_count;
+};
+
+inline bool parse_bpb(
+    const uint8_t sector[512],
+    uint32_t disk_sectors,
+    BpbGeometry& out)
+{
+    if (sector == nullptr || disk_sectors == 0) {
+        return false;
+    }
+
+    if (sector[510] != 0x55 || sector[511] != 0xAA) {
+        return false;
+    }
+
+    const uint16_t bytes_per_sector = le16(sector + 11);
+    const uint8_t sectors_per_cluster = sector[13];
+    const uint16_t reserved_sectors = le16(sector + 14);
+    const uint8_t fat_count = sector[16];
+
+    const uint16_t root_entry_count = le16(sector + 17);
+    const uint16_t total_sectors_16 = le16(sector + 19);
+    const uint16_t sectors_per_fat_16 = le16(sector + 22);
+
+    const uint32_t total_sectors_32 = le32(sector + 32);
+    const uint32_t sectors_per_fat = le32(sector + 36);
+
+    const uint16_t filesystem_version = le16(sector + 42);
+    const uint32_t root_cluster = le32(sector + 44);
+
+    if (bytes_per_sector != 512) {
+        return false;
+    }
+
+    if (!is_power_of_two(sectors_per_cluster) ||
+        sectors_per_cluster > 128) {
+        return false;
+    }
+
+    if (reserved_sectors == 0 || fat_count == 0) {
+        return false;
+    }
+
+    if (root_entry_count != 0 ||
+        sectors_per_fat_16 != 0 ||
+        sectors_per_fat == 0) {
+        return false;
+    }
+
+    if (filesystem_version != 0 || root_cluster < 2) {
+        return false;
+    }
+
+    const uint32_t total_sectors =
+        total_sectors_16 != 0
+            ? static_cast<uint32_t>(total_sectors_16)
+            : total_sectors_32;
+
+    if (total_sectors == 0 || total_sectors > disk_sectors) {
+        return false;
+    }
+
+    uint32_t fat_sectors = 0;
+
+    if (!checked_mul_u32(
+            static_cast<uint32_t>(fat_count),
+            sectors_per_fat,
+            fat_sectors)) {
+        return false;
+    }
+
+    uint32_t first_data_lba = 0;
+
+    if (!checked_add_u32(
+            static_cast<uint32_t>(reserved_sectors),
+            fat_sectors,
+            first_data_lba)) {
+        return false;
+    }
+
+    if (first_data_lba >= total_sectors) {
+        return false;
+    }
+
+    const uint32_t data_sectors =
+        total_sectors - first_data_lba;
+
+    const uint32_t cluster_count =
+        data_sectors /
+        static_cast<uint32_t>(sectors_per_cluster);
+
+    // Microsoft FAT classification:
+    // FAT32 requires at least 65525 data clusters.
+    if (cluster_count < 65525) {
+        return false;
+    }
+
+    uint32_t max_cluster = 0;
+
+    if (!checked_add_u32(cluster_count, 1, max_cluster)) {
+        return false;
+    }
+
+    if (root_cluster > max_cluster) {
+        return false;
+    }
+
+    out.bytes_per_sector = bytes_per_sector;
+    out.sectors_per_cluster = sectors_per_cluster;
+    out.reserved_sectors = reserved_sectors;
+    out.fat_count = fat_count;
+    out.total_sectors = total_sectors;
+    out.sectors_per_fat = sectors_per_fat;
+    out.root_cluster = root_cluster;
+    out.fat_begin_lba =
+        static_cast<uint32_t>(reserved_sectors);
+    out.first_data_lba = first_data_lba;
+    out.cluster_count = cluster_count;
+
+    return true;
+}
+
 } // namespace linux95::filesystem::fat32::helpers

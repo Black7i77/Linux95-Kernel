@@ -62,6 +62,8 @@ KERNEL_OBJS := \
 	$(BUILD)/ata.o \
 	$(BUILD)/disk.o \
 	$(BUILD)/storage_self_test.o \
+	$(BUILD)/fat32.o \
+	$(BUILD)/filesystem.o \
 	$(BUILD)/shell.o
 
 .PHONY: all clean run run-debug test test-qemu prepare-storage-test-image test-host-memory test-host-storage test-host-filesystem test-memory-source test-storage-source test-relocations check-tools
@@ -160,8 +162,12 @@ test-host-storage: $(BUILD)/host-ata-helpers-test
 $(BUILD)/host-fat32-helpers-test: tests/host/fat32_helpers_test.cpp | $(BUILD)
 >$(CXX) $(HOST_CXXFLAGS) $< -o $@
 
-test-host-filesystem: $(BUILD)/host-fat32-helpers-test
+$(BUILD)/host-fat32-mount-test: tests/host/fat32_mount_test.cpp | $(BUILD)
+>$(CXX) $(HOST_CXXFLAGS) tests/host/fat32_mount_test.cpp kernel/filesystem/fat32.cpp kernel/filesystem/filesystem.cpp -o $@
+
+test-host-filesystem: $(BUILD)/host-fat32-helpers-test $(BUILD)/host-fat32-mount-test
 >$(BUILD)/host-fat32-helpers-test
+>$(BUILD)/host-fat32-mount-test
 
 $(BUILD)/heap.o: kernel/memory/heap.cpp kernel/memory/heap.hpp | $(BUILD)
 >$(CXX) $(CXXFLAGS) -c $< -o $@
@@ -170,6 +176,12 @@ $(BUILD)/ata.o: kernel/storage/ata.cpp kernel/storage/ata.hpp kernel/storage/ata
 >$(CXX) $(CXXFLAGS) -c $< -o $@
 
 $(BUILD)/disk.o: kernel/storage/disk.cpp kernel/storage/disk.hpp kernel/storage/ata.hpp | $(BUILD)
+>$(CXX) $(CXXFLAGS) -c $< -o $@
+
+$(BUILD)/fat32.o: kernel/filesystem/fat32.cpp kernel/filesystem/fat32.hpp kernel/filesystem/fat32_helpers.hpp kernel/filesystem/filesystem.hpp kernel/storage/disk.hpp | $(BUILD)
+>$(CXX) $(CXXFLAGS) -c $< -o $@
+
+$(BUILD)/filesystem.o: kernel/filesystem/filesystem.cpp kernel/filesystem/filesystem.hpp kernel/filesystem/fat32.hpp | $(BUILD)
 >$(CXX) $(CXXFLAGS) -c $< -o $@
 
 $(BUILD)/storage_self_test.o: kernel/storage/storage_self_test.cpp kernel/storage/storage_self_test.hpp kernel/storage/disk.hpp kernel/storage/ata_helpers.hpp kernel/arch/debug.hpp | $(BUILD)

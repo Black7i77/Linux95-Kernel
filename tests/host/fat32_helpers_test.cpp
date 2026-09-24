@@ -49,5 +49,90 @@ int main()
     assert(valid_path_component("README.TXT", 10));
     assert(!valid_path_component("ABCDEFGHI.TXT", 13));
 
+    uint8_t bpb[512] = {};
+
+    auto put16 = [&](size_t offset, uint16_t value) {
+        bpb[offset] = static_cast<uint8_t>(value & 0xFFu);
+        bpb[offset + 1] =
+            static_cast<uint8_t>((value >> 8) & 0xFFu);
+    };
+
+    auto put32 = [&](size_t offset, uint32_t value) {
+        bpb[offset] =
+            static_cast<uint8_t>(value & 0xFFu);
+        bpb[offset + 1] =
+            static_cast<uint8_t>((value >> 8) & 0xFFu);
+        bpb[offset + 2] =
+            static_cast<uint8_t>((value >> 16) & 0xFFu);
+        bpb[offset + 3] =
+            static_cast<uint8_t>((value >> 24) & 0xFFu);
+    };
+
+    put16(11, 512);
+    bpb[13] = 1;
+    put16(14, 32);
+    bpb[16] = 2;
+    put16(17, 0);
+    put16(19, 0);
+    put16(22, 0);
+    put32(32, 131072);
+    put32(36, 1010);
+    put16(42, 0);
+    put32(44, 2);
+    bpb[510] = 0x55;
+    bpb[511] = 0xAA;
+
+    BpbGeometry geometry = {};
+
+    assert(parse_bpb(bpb, 131072, geometry));
+    assert(geometry.bytes_per_sector == 512);
+    assert(geometry.sectors_per_cluster == 1);
+    assert(geometry.reserved_sectors == 32);
+    assert(geometry.fat_count == 2);
+    assert(geometry.total_sectors == 131072);
+    assert(geometry.sectors_per_fat == 1010);
+    assert(geometry.root_cluster == 2);
+    assert(geometry.fat_begin_lba == 32);
+    assert(geometry.first_data_lba == 2052);
+    assert(geometry.cluster_count == 129020);
+
+    bpb[510] = 0;
+    assert(!parse_bpb(bpb, 131072, geometry));
+    bpb[510] = 0x55;
+
+    put16(11, 1024);
+    assert(!parse_bpb(bpb, 131072, geometry));
+    put16(11, 512);
+
+    bpb[13] = 0;
+    assert(!parse_bpb(bpb, 131072, geometry));
+    bpb[13] = 1;
+
+    bpb[13] = 3;
+    assert(!parse_bpb(bpb, 131072, geometry));
+    bpb[13] = 1;
+
+    put16(14, 0);
+    assert(!parse_bpb(bpb, 131072, geometry));
+    put16(14, 32);
+
+    bpb[16] = 0;
+    assert(!parse_bpb(bpb, 131072, geometry));
+    bpb[16] = 2;
+
+    put16(42, 1);
+    assert(!parse_bpb(bpb, 131072, geometry));
+    put16(42, 0);
+
+    put32(44, 1);
+    assert(!parse_bpb(bpb, 131072, geometry));
+    put32(44, 2);
+
+    assert(!parse_bpb(bpb, 100000, geometry));
+
+    put32(36, 0xFFFFFFFFu);
+    assert(!parse_bpb(bpb, 131072, geometry));
+    put32(36, 1010);
+
     return 0;
 }
