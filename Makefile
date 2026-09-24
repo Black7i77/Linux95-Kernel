@@ -260,7 +260,7 @@ $(BUILD)/linux95-kernel.img: \
 >dd if=$(BUILD)/stage2.bin of=$@ bs=$(SECTOR) seek=1 conv=notrunc status=none
 >dd if=$(BUILD)/kernel.bin of=$@ bs=$(SECTOR) seek=$(KERNEL_LBA) conv=notrunc status=none
 >@echo
->@echo "Linux95 Kernel v1.0 Storage Foundation image built:"
+>@echo "Linux95 Kernel v1.0 VFS Foundation image built:"
 >@ls -lh $@
 
 $(STORAGE_TEST_IMAGE): | $(BUILD)
