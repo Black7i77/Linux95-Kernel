@@ -64,7 +64,7 @@ KERNEL_OBJS := \
 	$(BUILD)/storage_self_test.o \
 	$(BUILD)/shell.o
 
-.PHONY: all clean run run-debug test test-qemu prepare-storage-test-image test-host-memory test-host-storage test-memory-source test-storage-source test-relocations check-tools
+.PHONY: all clean run run-debug test test-qemu prepare-storage-test-image test-host-memory test-host-storage test-host-filesystem test-memory-source test-storage-source test-relocations check-tools
 
 all: check-tools $(BUILD)/linux95-kernel.img
 
@@ -157,6 +157,11 @@ $(BUILD)/host-ata-helpers-test: tests/host/ata_helpers_test.cpp | $(BUILD)
 
 test-host-storage: $(BUILD)/host-ata-helpers-test
 >$(BUILD)/host-ata-helpers-test
+$(BUILD)/host-fat32-helpers-test: tests/host/fat32_helpers_test.cpp | $(BUILD)
+>$(CXX) $(HOST_CXXFLAGS) $< -o $@
+
+test-host-filesystem: $(BUILD)/host-fat32-helpers-test
+>$(BUILD)/host-fat32-helpers-test
 
 $(BUILD)/heap.o: kernel/memory/heap.cpp kernel/memory/heap.hpp | $(BUILD)
 >$(CXX) $(CXXFLAGS) -c $< -o $@
@@ -223,7 +228,7 @@ test-relocations: all
 test-storage-source:
 >$(PYTHON) tests/storage_source_checks.py
 
-test: all test-host-memory test-host-storage
+test: all test-host-memory test-host-storage test-host-filesystem
 >$(PYTHON) tests/source_checks.py
 >$(PYTHON) tests/image_checks.py
 >$(PYTHON) tests/memory_source_checks.py
