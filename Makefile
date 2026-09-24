@@ -64,7 +64,9 @@ KERNEL_OBJS := \
 	$(BUILD)/storage_self_test.o \
 	$(BUILD)/fat32.o \
 	$(BUILD)/filesystem.o \
+	$(BUILD)/vfs.o \
 	$(BUILD)/filesystem_self_test.o \
+	$(BUILD)/vfs_self_test.o \
 	$(BUILD)/shell.o
 
 .PHONY: all clean run run-debug test test-qemu prepare-storage-test-image test-host-memory test-host-storage test-host-filesystem test-memory-source test-storage-source test-relocations check-tools
@@ -108,7 +110,11 @@ $(BUILD)/interrupts_asm.o: kernel/arch/interrupts.asm | $(BUILD)
 $(BUILD)/paging_bootstrap.o: kernel/arch/x86_64/paging_bootstrap.asm | $(BUILD)
 >$(NASM) -f elf64 $< -o $@
 
-$(BUILD)/kernel.o: kernel/kernel.cpp kernel/boot_info.hpp | $(BUILD)
+$(BUILD)/kernel.o: \
+	kernel/kernel.cpp \
+	kernel/boot_info.hpp \
+	kernel/filesystem/vfs.hpp \
+	kernel/filesystem/vfs_self_test.hpp | $(BUILD)
 >$(CXX) $(CXXFLAGS) -c $< -o $@
 
 $(BUILD)/vga.o: kernel/terminal/vga.cpp kernel/terminal/vga.hpp kernel/arch/io.hpp | $(BUILD)
@@ -200,7 +206,18 @@ $(BUILD)/fat32.o: kernel/filesystem/fat32.cpp kernel/filesystem/fat32.hpp kernel
 $(BUILD)/filesystem.o: kernel/filesystem/filesystem.cpp kernel/filesystem/filesystem.hpp kernel/filesystem/fat32.hpp | $(BUILD)
 >$(CXX) $(CXXFLAGS) -c $< -o $@
 
+$(BUILD)/vfs.o: kernel/filesystem/vfs.cpp kernel/filesystem/vfs.hpp kernel/filesystem/filesystem.hpp | $(BUILD)
+>$(CXX) $(CXXFLAGS) -c $< -o $@
+
 $(BUILD)/filesystem_self_test.o: kernel/filesystem/filesystem_self_test.cpp kernel/filesystem/filesystem_self_test.hpp kernel/filesystem/filesystem.hpp kernel/arch/debug.hpp | $(BUILD)
+>$(CXX) $(CXXFLAGS) -c $< -o $@
+
+$(BUILD)/vfs_self_test.o: \
+	kernel/filesystem/vfs_self_test.cpp \
+	kernel/filesystem/vfs_self_test.hpp \
+	kernel/filesystem/vfs.hpp \
+	kernel/filesystem/filesystem.hpp \
+	kernel/arch/debug.hpp | $(BUILD)
 >$(CXX) $(CXXFLAGS) -c $< -o $@
 
 $(BUILD)/storage_self_test.o: kernel/storage/storage_self_test.cpp kernel/storage/storage_self_test.hpp kernel/storage/disk.hpp kernel/storage/ata_helpers.hpp kernel/arch/debug.hpp | $(BUILD)

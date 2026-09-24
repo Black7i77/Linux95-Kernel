@@ -16,6 +16,8 @@
 #include "panic/panic.hpp"
 #include "filesystem/filesystem.hpp"
 #include "filesystem/filesystem_self_test.hpp"
+#include "filesystem/vfs.hpp"
+#include "filesystem/vfs_self_test.hpp"
 #include "storage/storage_self_test.hpp"
 #include "terminal/shell.hpp"
 #include "terminal/vga.hpp"
@@ -126,6 +128,14 @@ extern "C" [[noreturn]] void linux95_higher_half_entry(
     if (!filesystem::self_test::run()) {
         debug::write("[PANIC] filesystem_self_test\n");
         panic::halt("Filesystem self-test failed");
+    }
+
+    filesystem::vfs::initialize();
+    debug::write("[PASS] vfs_initialize\n");
+
+    if (!filesystem::vfs::self_test::run()) {
+        debug::write("[PANIC] vfs_self_test\n");
+        panic::halt("VFS self-test failed");
     }
 
     interrupts::initialize();

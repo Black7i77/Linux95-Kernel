@@ -125,6 +125,13 @@ required = [
     "[PASS] fat32_subdirectory",
     "[PASS] fat32_cluster_chain",
     "[PASS] filesystem_self_test",
+    "[PASS] vfs_initialize",
+    "[PASS] vfs_file_open",
+    "[PASS] vfs_file_read",
+    "[PASS] vfs_stat",
+    "[PASS] vfs_directory_open",
+    "[PASS] vfs_readdir",
+    "[PASS] vfs_self_test",
     "[PASS] shell_ready",
 ]
 
