@@ -1,6 +1,7 @@
 #include "arch/interrupts.hpp"
 
 #include "arch/keyboard.hpp"
+#include "arch/mouse.hpp"
 #include "arch/pic.hpp"
 #include "arch/pit.hpp"
 #include "panic/panic.hpp"
@@ -94,6 +95,12 @@ extern "C" void interrupt_dispatch(
     if (frame->vector == 33) {
         keyboard::on_irq();
         pic::send_eoi(1);
+        return;
+    }
+
+    if (frame->vector == 44) {
+        mouse::on_irq();
+        pic::send_eoi(12);
         return;
     }
 

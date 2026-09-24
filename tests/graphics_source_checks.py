@@ -44,3 +44,28 @@ for path in (ROOT / "kernel").rglob("*"):
         )
 
 print("graphics source checks: PASS")
+
+# Task 6: optional PS/2 mouse IRQ12 wiring.
+interrupts = (ROOT / "kernel/arch/interrupts.cpp").read_text()
+kernel = (ROOT / "kernel/kernel.cpp").read_text()
+
+if "frame->vector == 44" not in interrupts:
+    raise SystemExit("FAIL: IRQ12 vector 44 is not dispatched")
+
+if "mouse::on_irq()" not in interrupts:
+    raise SystemExit("FAIL: mouse IRQ handler is not called")
+
+if "pic::send_eoi(12)" not in interrupts:
+    raise SystemExit("FAIL: IRQ12 EOI missing")
+
+if "mouse::initialize()" not in kernel:
+    raise SystemExit("FAIL: PS/2 mouse is never initialized")
+
+if "pic::unmask_irq(12)" not in kernel:
+    raise SystemExit("FAIL: IRQ12 is never unmasked")
+
+if "[PASS] mouse_initialized" not in kernel:
+    raise SystemExit("FAIL: mouse success diagnostic missing")
+
+if "[INFO] mouse_unavailable" not in kernel:
+    raise SystemExit("FAIL: optional mouse fallback diagnostic missing")

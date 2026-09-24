@@ -5,6 +5,7 @@
 #include "arch/io.hpp"
 #include "arch/interrupts.hpp"
 #include "arch/keyboard.hpp"
+#include "arch/mouse.hpp"
 #include "arch/pic.hpp"
 #include "arch/pit.hpp"
 #include "memory/address.hpp"
@@ -164,8 +165,20 @@ extern "C" [[noreturn]] void linux95_higher_half_entry(
     pic::initialize();
     pit::initialize(100);
     keyboard::initialize();
+
+    const bool mouse_online =
+        mouse::initialize();
+
     pic::unmask_irq(0);
     pic::unmask_irq(1);
+
+    if (mouse_online) {
+        pic::unmask_irq(12);
+        debug::write("[PASS] mouse_initialized\n");
+    } else {
+        debug::write("[INFO] mouse_unavailable\n");
+    }
+
     io::enable_interrupts();
 
     vga::set_color(10, 0);
