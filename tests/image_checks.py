@@ -7,6 +7,24 @@ import subprocess
 ROOT = Path(__file__).resolve().parents[1]
 BUILD = ROOT / "build"
 
+makefile_text = (ROOT / "Makefile").read_text()
+kernel_sector_match = re.search(
+    r"^KERNEL_SECTORS\s*:=\s*(\d+)\s*$",
+    makefile_text,
+    re.MULTILINE,
+)
+
+if kernel_sector_match is None:
+    raise SystemExit("FAIL: unable to read KERNEL_SECTORS from Makefile")
+
+kernel_sectors = int(kernel_sector_match.group(1))
+
+if kernel_sectors % 64 != 0:
+    raise SystemExit(
+        f"FAIL: KERNEL_SECTORS={kernel_sectors} is not divisible by 64"
+    )
+
+
 makefile = (ROOT / "Makefile").read_text()
 stage2_source = (ROOT / "boot/stage2.asm").read_text()
 

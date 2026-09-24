@@ -13,8 +13,8 @@ QEMU := qemu-system-x86_64
 SECTOR := 512
 STAGE2_SECTORS := 16
 KERNEL_LBA := 17
-KERNEL_SECTORS := 128
-IMAGE_SECTORS := 145
+KERNEL_SECTORS := 256
+IMAGE_SECTORS := 273
 STORAGE_TEST_IMAGE := $(BUILD)/linux95-storage-test.img
 
 HOST_CXXFLAGS := -std=c++17 -Wall -Wextra -Werror -O2 -Ikernel
