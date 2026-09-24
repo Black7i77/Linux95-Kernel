@@ -109,7 +109,6 @@ readme = ROOT / "README.md"
 if readme.is_file():
     readme_text = readme.read_text(errors="replace")
     for literal in (
-        "v1.0 Storage Foundation",
         "ATA PIO",
         "diskinfo",
         "FAT/filesystem",
