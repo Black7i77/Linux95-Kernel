@@ -223,7 +223,10 @@ $(BUILD)/vfs_self_test.o: \
 $(BUILD)/storage_self_test.o: kernel/storage/storage_self_test.cpp kernel/storage/storage_self_test.hpp kernel/storage/disk.hpp kernel/storage/ata_helpers.hpp kernel/arch/debug.hpp | $(BUILD)
 >$(CXX) $(CXXFLAGS) -c $< -o $@
 
-$(BUILD)/shell.o: kernel/terminal/shell.cpp kernel/terminal/shell.hpp | $(BUILD)
+$(BUILD)/shell.o: \
+	kernel/terminal/shell.cpp \
+	kernel/terminal/shell.hpp \
+	kernel/filesystem/vfs.hpp | $(BUILD)
 >$(CXX) $(CXXFLAGS) -c $< -o $@
 
 $(BUILD)/kernel.elf: $(KERNEL_OBJS) linker.ld

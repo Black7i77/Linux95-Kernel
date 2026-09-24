@@ -9,6 +9,7 @@
 #include "memory/memory.hpp"
 #include "memory/physical.hpp"
 #include "filesystem/filesystem.hpp"
+#include "filesystem/vfs.hpp"
 #include "storage/disk.hpp"
 #include "terminal/vga.hpp"
 
@@ -203,18 +204,46 @@ void print_fsinfo()
     vga::write("  Mode: read-only\n");
 }
 
-bool print_entry(
-    const filesystem::Entry& entry,
-    void*)
+void print_ls_error(
+    filesystem::Status status)
 {
-    vga::write(entry.name);
+    vga::write("ls: ");
 
-    if (entry.is_directory) {
-        vga::put_char('/');
+    if (status == filesystem::Status::NotFound) {
+        vga::write("not found");
+    } else if (
+        status ==
+        filesystem::Status::NotDirectory) {
+        vga::write("not a directory");
+    } else if (
+        status ==
+        filesystem::Status::NotMounted) {
+        vga::write("filesystem not mounted");
+    } else if (
+        status ==
+        filesystem::Status::Corrupt) {
+        vga::write("filesystem corrupt");
+    } else if (
+        status ==
+        filesystem::Status::IoError) {
+        vga::write("I/O error");
+    } else if (
+        status ==
+        filesystem::Status::Unsupported) {
+        vga::write("unsupported path");
+    } else if (
+        status ==
+        filesystem::Status::TooManyOpenDirectories) {
+        vga::write("too many open directories");
+    } else if (
+        status ==
+        filesystem::Status::InvalidHandle) {
+        vga::write("invalid directory handle");
+    } else {
+        vga::write("unable to list directory");
     }
 
     vga::put_char('\n');
-    return true;
 }
 
 void print_ls(const char* path)
@@ -222,30 +251,98 @@ void print_ls(const char* path)
     const char* const target =
         path != nullptr ? path : "/";
 
-    const filesystem::Status status =
-        filesystem::list_directory(
-            target,
-            print_entry,
-            nullptr);
+    filesystem::Status status =
+        filesystem::Status::Corrupt;
 
-    if (status == filesystem::Status::Ok) {
+    const int handle =
+        filesystem::vfs::opendir(
+            target,
+            status);
+
+    if (handle < 0) {
+        print_ls_error(status);
         return;
     }
 
-    vga::write("ls: ");
+    for (;;) {
+        filesystem::vfs::DirectoryEntry entry = {};
+        bool end = false;
+
+        status =
+            filesystem::vfs::readdir(
+                handle,
+                entry,
+                end);
+
+        if (status != filesystem::Status::Ok) {
+            filesystem::vfs::closedir(handle);
+            print_ls_error(status);
+            return;
+        }
+
+        if (end) {
+            break;
+        }
+
+        vga::write(entry.name);
+
+        if (entry.is_directory) {
+            vga::put_char('/');
+        }
+
+        vga::put_char('\n');
+    }
+
+    status =
+        filesystem::vfs::closedir(handle);
+
+    if (status != filesystem::Status::Ok) {
+        print_ls_error(status);
+    }
+}
+
+void print_cat_error(
+    filesystem::Status status)
+{
+    vga::write("cat: ");
 
     if (status == filesystem::Status::NotFound) {
         vga::write("not found");
-    } else if (status == filesystem::Status::NotDirectory) {
-        vga::write("not a directory");
-    } else if (status == filesystem::Status::NotMounted) {
+    } else if (
+        status ==
+        filesystem::Status::IsDirectory) {
+        vga::write("is a directory");
+    } else if (
+        status ==
+        filesystem::Status::NotDirectory) {
+        vga::write(
+            "path component is not a directory");
+    } else if (
+        status ==
+        filesystem::Status::NotMounted) {
         vga::write("filesystem not mounted");
-    } else if (status == filesystem::Status::Corrupt) {
+    } else if (
+        status ==
+        filesystem::Status::Corrupt) {
         vga::write("filesystem corrupt");
-    } else if (status == filesystem::Status::IoError) {
+    } else if (
+        status ==
+        filesystem::Status::IoError) {
         vga::write("I/O error");
+    } else if (
+        status ==
+        filesystem::Status::Unsupported) {
+        vga::write("unsupported path");
+    } else if (
+        status ==
+        filesystem::Status::TooManyOpenFiles) {
+        vga::write("too many open files");
+    } else if (
+        status ==
+        filesystem::Status::InvalidDescriptor) {
+        vga::write("invalid file descriptor");
     } else {
-        vga::write("unable to list directory");
+        vga::write("unable to read file");
     }
 
     vga::put_char('\n');
@@ -259,42 +356,34 @@ void print_cat(const char* path)
         return;
     }
 
+    filesystem::Status status =
+        filesystem::Status::Corrupt;
+
+    const int fd =
+        filesystem::vfs::open(
+            path,
+            status);
+
+    if (fd < 0) {
+        print_cat_error(status);
+        return;
+    }
+
     uint8_t buffer[128];
-    uint32_t offset = 0;
 
     for (;;) {
         size_t got = 0;
-        uint32_t size = 0;
 
-        const filesystem::Status status =
-            filesystem::read_file(
-                path,
-                offset,
+        status =
+            filesystem::vfs::read(
+                fd,
                 buffer,
                 sizeof(buffer),
-                got,
-                size);
+                got);
 
         if (status != filesystem::Status::Ok) {
-            vga::write("cat: ");
-
-            if (status == filesystem::Status::NotFound) {
-                vga::write("not found");
-            } else if (status == filesystem::Status::IsDirectory) {
-                vga::write("is a directory");
-            } else if (status == filesystem::Status::NotDirectory) {
-                vga::write("path component is not a directory");
-            } else if (status == filesystem::Status::NotMounted) {
-                vga::write("filesystem not mounted");
-            } else if (status == filesystem::Status::Corrupt) {
-                vga::write("filesystem corrupt");
-            } else if (status == filesystem::Status::IoError) {
-                vga::write("I/O error");
-            } else {
-                vga::write("unable to read file");
-            }
-
-            vga::put_char('\n');
+            filesystem::vfs::close(fd);
+            print_cat_error(status);
             return;
         }
 
@@ -306,13 +395,16 @@ void print_cat(const char* path)
                     buffer[i]));
         }
 
-        offset +=
-            static_cast<uint32_t>(got);
-
-        if (got == 0 ||
-            offset >= size) {
+        if (got == 0) {
             break;
         }
+    }
+
+    status =
+        filesystem::vfs::close(fd);
+
+    if (status != filesystem::Status::Ok) {
+        print_cat_error(status);
     }
 }
 

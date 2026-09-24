@@ -47,6 +47,36 @@ for command in ("fsinfo", "ls", "cat"):
             f"FAIL: shell command {command!r} missing"
         )
 
+# Shell file/directory access must go through the VFS layer.
+if '#include "filesystem/vfs.hpp"' not in shell:
+    raise SystemExit(
+        "FAIL: shell does not include filesystem/vfs.hpp"
+    )
+
+required_vfs_calls = (
+    "filesystem::vfs::opendir",
+    "filesystem::vfs::readdir",
+    "filesystem::vfs::closedir",
+    "filesystem::vfs::open",
+    "filesystem::vfs::read",
+    "filesystem::vfs::close",
+)
+
+for call in required_vfs_calls:
+    if call not in shell:
+        raise SystemExit(
+            f"FAIL: shell missing VFS call: {call}"
+        )
+
+for raw_call in (
+    "filesystem::list_directory(",
+    "filesystem::read_file(",
+):
+    if raw_call in shell:
+        raise SystemExit(
+            f"FAIL: shell bypasses VFS: {raw_call}"
+        )
+
 forbidden_api = re.compile(
     r"\b(create|delete|rename|truncate|mkdir|write)\s*\("
 )
