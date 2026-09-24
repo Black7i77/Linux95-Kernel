@@ -59,6 +59,18 @@ bool valid_file_descriptor(int fd)
     return file_descriptors[fd].in_use;
 }
 
+bool valid_dir_handle(int dir_handle)
+{
+    if (dir_handle < 0 ||
+        dir_handle >= static_cast<int>(
+            kDirectoryHandleCount)) {
+        return false;
+    }
+
+    return directory_handles[
+        dir_handle].in_use;
+}
+
 } // namespace
 
 void initialize()
@@ -246,6 +258,136 @@ Status fstat(
 
     info.is_directory = false;
     info.size = slot.size;
+
+    return Status::Ok;
+}
+
+int opendir(
+    const char* path,
+    Status& status)
+{
+    char safe_path[kPathCapacity] = {};
+
+    if (!copy_path(
+            path,
+            safe_path)) {
+        status = Status::Unsupported;
+        return -1;
+    }
+
+    FileStat info = {};
+
+    status =
+        vfs::stat(
+            safe_path,
+            info);
+
+    if (status != Status::Ok) {
+        return -1;
+    }
+
+    if (!info.is_directory) {
+        status = Status::NotDirectory;
+        return -1;
+    }
+
+    for (int handle = 0;
+         handle < static_cast<int>(
+             kDirectoryHandleCount);
+         ++handle) {
+
+        if (directory_handles[
+                handle].in_use) {
+            continue;
+        }
+
+        DirectoryHandle& slot =
+            directory_handles[handle];
+
+        slot = DirectoryHandle{};
+
+        for (size_t i = 0;
+             i < kPathCapacity;
+             ++i) {
+            slot.path[i] =
+                safe_path[i];
+        }
+
+        slot.in_use = true;
+        slot.next_index = 0;
+
+        status = Status::Ok;
+        return handle;
+    }
+
+    status =
+        Status::TooManyOpenDirectories;
+
+    return -1;
+}
+
+Status readdir(
+    int dir_handle,
+    DirectoryEntry& entry,
+    bool& end)
+{
+    end = false;
+
+    if (!valid_dir_handle(
+            dir_handle)) {
+        return Status::InvalidHandle;
+    }
+
+    DirectoryHandle& slot =
+        directory_handles[dir_handle];
+
+    Entry backend_entry = {};
+    bool backend_end = false;
+
+    const Status status =
+        ::linux95::filesystem::
+            read_directory_entry(
+                slot.path,
+                slot.next_index,
+                backend_entry,
+                backend_end);
+
+    if (status != Status::Ok) {
+        return status;
+    }
+
+    if (backend_end) {
+        end = true;
+        return Status::Ok;
+    }
+
+    for (size_t i = 0;
+         i < 13;
+         ++i) {
+        entry.name[i] =
+            backend_entry.name[i];
+    }
+
+    entry.is_directory =
+        backend_entry.is_directory;
+
+    entry.size =
+        backend_entry.size;
+
+    ++slot.next_index;
+
+    return Status::Ok;
+}
+
+Status closedir(int dir_handle)
+{
+    if (!valid_dir_handle(
+            dir_handle)) {
+        return Status::InvalidHandle;
+    }
+
+    directory_handles[dir_handle] =
+        DirectoryHandle{};
 
     return Status::Ok;
 }
