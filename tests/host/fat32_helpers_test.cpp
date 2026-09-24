@@ -96,6 +96,12 @@ int main()
     assert(geometry.first_data_lba == 2052);
     assert(geometry.cluster_count == 129020);
 
+    // A FAT that cannot contain entries for every data cluster
+    // must be rejected during BPB validation.
+    put32(36, 1);
+    assert(!parse_bpb(bpb, 131072, geometry));
+    put32(36, 1010);
+
     bpb[510] = 0;
     assert(!parse_bpb(bpb, 131072, geometry));
     bpb[510] = 0x55;
@@ -183,6 +189,25 @@ int main()
     dir[0] = 0x00;
     assert(decode_directory_entry(dir, decoded) ==
            DirectoryEntryKind::End);
+
+    // FAT directory bookkeeping entries "." and ".." must
+    // never be exposed through the filesystem API.
+    uint8_t dot_entry[32] = {};
+    memset(dot_entry, ' ', 11);
+    dot_entry[0] = '.';
+    dot_entry[11] = 0x10;
+
+    assert(decode_directory_entry(dot_entry, decoded) ==
+           DirectoryEntryKind::Skip);
+
+    uint8_t dotdot_entry[32] = {};
+    memset(dotdot_entry, ' ', 11);
+    dotdot_entry[0] = '.';
+    dotdot_entry[1] = '.';
+    dotdot_entry[11] = 0x10;
+
+    assert(decode_directory_entry(dotdot_entry, decoded) ==
+           DirectoryEntryKind::Skip);
 
     assert(ascii_iequals("docs", "DOCS"));
     assert(ascii_iequals("kernel.txt", "KERNEL.TXT"));

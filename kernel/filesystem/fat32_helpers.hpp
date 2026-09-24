@@ -360,6 +360,30 @@ inline bool parse_bpb(
         return false;
     }
 
+    // FAT32 needs entries 0 and 1 plus one entry for every
+    // data cluster. Each 512-byte FAT sector holds 128 entries.
+    uint32_t required_fat_entries = 0;
+
+    if (!checked_add_u32(
+            cluster_count,
+            2u,
+            required_fat_entries)) {
+        return false;
+    }
+
+    uint32_t fat_entry_capacity = 0;
+
+    if (!checked_mul_u32(
+            sectors_per_fat,
+            128u,
+            fat_entry_capacity)) {
+        return false;
+    }
+
+    if (fat_entry_capacity < required_fat_entries) {
+        return false;
+    }
+
     uint32_t max_cluster = 0;
 
     if (!checked_add_u32(cluster_count, 1, max_cluster)) {
@@ -422,6 +446,13 @@ inline DirectoryEntryKind decode_directory_entry(
     }
 
     if ((attributes & 0x08u) != 0) {
+        return DirectoryEntryKind::Skip;
+    }
+
+    // FAT directory bookkeeping entries "." and ".." are
+    // navigation metadata, not user-visible directory contents.
+    if (raw[0] == '.' &&
+        (raw[1] == ' ' || raw[1] == '.')) {
         return DirectoryEntryKind::Skip;
     }
 

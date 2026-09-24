@@ -160,7 +160,7 @@ $(BUILD)/host-ata-helpers-test: tests/host/ata_helpers_test.cpp | $(BUILD)
 
 test-host-storage: $(BUILD)/host-ata-helpers-test
 >$(BUILD)/host-ata-helpers-test
-$(BUILD)/host-fat32-helpers-test: tests/host/fat32_helpers_test.cpp | $(BUILD)
+$(BUILD)/host-fat32-helpers-test: tests/host/fat32_helpers_test.cpp kernel/filesystem/fat32_helpers.hpp | $(BUILD)
 >$(CXX) $(HOST_CXXFLAGS) $< -o $@
 
 $(BUILD)/host-fat32-mount-test: \
