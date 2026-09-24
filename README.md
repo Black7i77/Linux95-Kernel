@@ -118,3 +118,7 @@ The automated QEMU test requires the memory checkpoints plus these storage check
 This is still a small standalone experimental kernel. The FAT32 layer is intentionally read-only and limited to DOS 8.3 names. It does **not** include writable FAT operations, long file names, partition parsing, AHCI, DMA, IRQ-driven ATA, NVMe, USB storage, networking, audio, SMP, user mode, processes, or a graphical desktop.
 
 It is not Linux ABI compatible and is separate from the Debian-based Linux95 distribution.
+
+## License
+
+Linux95 Kernel is released under the MIT License. See [`LICENSE`](LICENSE).
