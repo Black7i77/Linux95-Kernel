@@ -372,3 +372,13 @@ test-host-shell-session: $(BUILD)/host-shell-session-test
 >$(BUILD)/host-shell-session-test
 
 test-host-graphics: test-host-shell-session
+
+.PHONY: test-host-window-manager
+
+$(BUILD)/host-window-manager-test: tests/host/window_manager_test.cpp kernel/gui/geometry.hpp kernel/gui/window_manager.hpp kernel/gui/window_manager.cpp | $(BUILD)
+>$(CXX) $(HOST_CXXFLAGS) tests/host/window_manager_test.cpp kernel/gui/window_manager.cpp -o $@
+
+test-host-window-manager: $(BUILD)/host-window-manager-test
+>$(BUILD)/host-window-manager-test
+
+test-host-graphics: test-host-window-manager
