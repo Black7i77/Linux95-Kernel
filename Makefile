@@ -173,9 +173,17 @@ $(BUILD)/host-fat32-mount-test: \
 	kernel/storage/disk.hpp | $(BUILD)
 >$(CXX) $(HOST_CXXFLAGS) tests/host/fat32_mount_test.cpp kernel/filesystem/fat32.cpp kernel/filesystem/filesystem.cpp -o $@
 
-test-host-filesystem: $(BUILD)/host-fat32-helpers-test $(BUILD)/host-fat32-mount-test
+$(BUILD)/host-vfs-test: \
+	tests/host/vfs_test.cpp \
+	kernel/filesystem/vfs.cpp \
+	kernel/filesystem/vfs.hpp \
+	kernel/filesystem/filesystem.hpp | $(BUILD)
+>$(CXX) $(HOST_CXXFLAGS) tests/host/vfs_test.cpp kernel/filesystem/vfs.cpp -o $@
+
+test-host-filesystem: $(BUILD)/host-fat32-helpers-test $(BUILD)/host-fat32-mount-test $(BUILD)/host-vfs-test
 >$(BUILD)/host-fat32-helpers-test
 >$(BUILD)/host-fat32-mount-test
+>$(BUILD)/host-vfs-test
 
 $(BUILD)/heap.o: kernel/memory/heap.cpp kernel/memory/heap.hpp | $(BUILD)
 >$(CXX) $(CXXFLAGS) -c $< -o $@
