@@ -69,7 +69,7 @@ KERNEL_OBJS := \
 	$(BUILD)/vfs_self_test.o \
 	$(BUILD)/shell.o
 
-.PHONY: all clean run run-debug test test-qemu prepare-storage-test-image test-host-memory test-host-storage test-host-filesystem test-memory-source test-storage-source test-relocations check-tools
+.PHONY: all clean run run-debug test test-qemu prepare-storage-test-image test-host-memory test-host-storage test-host-filesystem test-host-graphics test-memory-source test-storage-source test-relocations check-tools
 
 all: check-tools $(BUILD)/linux95-kernel.img
 
@@ -186,6 +186,12 @@ $(BUILD)/host-vfs-test: \
 	kernel/filesystem/filesystem.hpp | $(BUILD)
 >$(CXX) $(HOST_CXXFLAGS) tests/host/vfs_test.cpp kernel/filesystem/vfs.cpp -o $@
 
+$(BUILD)/host-framebuffer-helpers-test: tests/host/framebuffer_helpers_test.cpp kernel/graphics/framebuffer_helpers.hpp kernel/boot_info.hpp | $(BUILD)
+>$(CXX) $(HOST_CXXFLAGS) $< -o $@
+
+test-host-graphics: $(BUILD)/host-framebuffer-helpers-test
+>$(BUILD)/host-framebuffer-helpers-test
+
 test-host-filesystem: $(BUILD)/host-fat32-helpers-test $(BUILD)/host-fat32-mount-test $(BUILD)/host-vfs-test
 >$(BUILD)/host-fat32-helpers-test
 >$(BUILD)/host-fat32-mount-test
@@ -284,7 +290,7 @@ test-storage-source:
 test-filesystem-source:
 >$(PYTHON) tests/filesystem_source_checks.py
 
-test: all test-host-memory test-host-storage test-host-filesystem
+test: all test-host-memory test-host-storage test-host-filesystem test-host-graphics test-host-graphics
 >$(PYTHON) tests/source_checks.py
 >$(PYTHON) tests/image_checks.py
 >$(PYTHON) tests/memory_source_checks.py

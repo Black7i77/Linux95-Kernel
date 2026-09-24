@@ -8,7 +8,8 @@ def require(path, needle):
     if needle not in text:
         raise SystemExit(f"FAIL: {needle!r} missing from {path}")
 
-require("kernel/boot_info.hpp", "static_assert(sizeof(BootInfo) == 17")
+require("kernel/boot_info.hpp", "static_assert(sizeof(FramebufferInfo) == 28")
+require("kernel/boot_info.hpp", "static_assert(sizeof(BootInfo) == 45")
 require("kernel/boot_info.hpp", "static_assert(sizeof(E820Entry) == 24")
 require("kernel/entry.asm", "extern _bss_start")
 require("kernel/entry.asm", "rep stosb")
