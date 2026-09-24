@@ -64,6 +64,7 @@ KERNEL_OBJS := \
 	$(BUILD)/storage_self_test.o \
 	$(BUILD)/fat32.o \
 	$(BUILD)/filesystem.o \
+	$(BUILD)/filesystem_self_test.o \
 	$(BUILD)/shell.o
 
 .PHONY: all clean run run-debug test test-qemu prepare-storage-test-image test-host-memory test-host-storage test-host-filesystem test-memory-source test-storage-source test-relocations check-tools
@@ -189,6 +190,9 @@ $(BUILD)/fat32.o: kernel/filesystem/fat32.cpp kernel/filesystem/fat32.hpp kernel
 >$(CXX) $(CXXFLAGS) -c $< -o $@
 
 $(BUILD)/filesystem.o: kernel/filesystem/filesystem.cpp kernel/filesystem/filesystem.hpp kernel/filesystem/fat32.hpp | $(BUILD)
+>$(CXX) $(CXXFLAGS) -c $< -o $@
+
+$(BUILD)/filesystem_self_test.o: kernel/filesystem/filesystem_self_test.cpp kernel/filesystem/filesystem_self_test.hpp kernel/filesystem/filesystem.hpp kernel/arch/debug.hpp | $(BUILD)
 >$(CXX) $(CXXFLAGS) -c $< -o $@
 
 $(BUILD)/storage_self_test.o: kernel/storage/storage_self_test.cpp kernel/storage/storage_self_test.hpp kernel/storage/disk.hpp kernel/storage/ata_helpers.hpp kernel/arch/debug.hpp | $(BUILD)

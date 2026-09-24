@@ -14,6 +14,8 @@
 #include "memory/self_test.hpp"
 #include "memory/virtual.hpp"
 #include "panic/panic.hpp"
+#include "filesystem/filesystem.hpp"
+#include "filesystem/filesystem_self_test.hpp"
 #include "storage/storage_self_test.hpp"
 #include "terminal/shell.hpp"
 #include "terminal/vga.hpp"
@@ -112,6 +114,18 @@ extern "C" [[noreturn]] void linux95_higher_half_entry(
 
     if (!heap::initialize(memory::heap_start(), memory::heap_end())) {
         panic::halt("Could not initialize kernel heap");
+    }
+
+    if (!filesystem::initialize()) {
+        debug::write("[PANIC] fat32_mount\n");
+        panic::halt("FAT32 mount failed");
+    }
+
+    debug::write("[PASS] fat32_mount\n");
+
+    if (!filesystem::self_test::run()) {
+        debug::write("[PANIC] filesystem_self_test\n");
+        panic::halt("Filesystem self-test failed");
     }
 
     interrupts::initialize();

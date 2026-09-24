@@ -118,6 +118,13 @@ required = [
     "[PASS] ata_restore",
     "[PASS] master_write_guard",
     "[PASS] storage_self_test",
+    "[PASS] fat32_mount",
+    "[PASS] fat32_root_list",
+    "[PASS] fat32_file_lookup",
+    "[PASS] fat32_file_read",
+    "[PASS] fat32_subdirectory",
+    "[PASS] fat32_cluster_chain",
+    "[PASS] filesystem_self_test",
     "[PASS] shell_ready",
 ]
 
