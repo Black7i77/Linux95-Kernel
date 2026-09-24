@@ -253,11 +253,15 @@ test-relocations: all
 test-storage-source:
 >$(PYTHON) tests/storage_source_checks.py
 
+test-filesystem-source:
+>$(PYTHON) tests/filesystem_source_checks.py
+
 test: all test-host-memory test-host-storage test-host-filesystem
 >$(PYTHON) tests/source_checks.py
 >$(PYTHON) tests/image_checks.py
 >$(PYTHON) tests/memory_source_checks.py
 >$(PYTHON) tests/storage_source_checks.py
+>$(PYTHON) tests/filesystem_source_checks.py
 >$(PYTHON) tests/relocation_checks.py
 
 test-qemu: all prepare-storage-test-image

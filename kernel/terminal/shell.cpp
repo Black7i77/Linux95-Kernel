@@ -8,6 +8,7 @@
 #include "memory/heap.hpp"
 #include "memory/memory.hpp"
 #include "memory/physical.hpp"
+#include "filesystem/filesystem.hpp"
 #include "storage/disk.hpp"
 #include "terminal/vga.hpp"
 
@@ -27,6 +28,41 @@ bool equals(const char* a, const char* b)
         ++b;
     }
     return *a == '\0' && *b == '\0';
+}
+
+struct ParsedCommand {
+    char* name;
+    char* argument;
+};
+
+ParsedCommand parse_command(char* input)
+{
+    while (*input == ' ') {
+        ++input;
+    }
+
+    char* const name = input;
+
+    while (*input != '\0' &&
+           *input != ' ') {
+        ++input;
+    }
+
+    if (*input == '\0') {
+        return {name, nullptr};
+    }
+
+    *input = '\0';
+    ++input;
+
+    while (*input == ' ') {
+        ++input;
+    }
+
+    return {
+        name,
+        *input != '\0' ? input : nullptr,
+    };
 }
 
 void prompt()
@@ -52,6 +88,9 @@ void print_help()
     vga::write("  version  Show kernel version\n");
     vga::write("  mem      Show memory statistics\n");
     vga::write("  diskinfo Show ATA disk information\n");
+    vga::write("  fsinfo   Show FAT32 filesystem information\n");
+    vga::write("  ls [path] List FAT32 directory\n");
+    vga::write("  cat <path> Read FAT32 file\n");
     vga::write("  uptime   Show uptime in seconds\n");
     vga::write("  reboot   Reboot the machine\n");
 }
@@ -125,6 +164,158 @@ void print_diskinfo()
     print_disk("Test disk", storage::DiskId::Test, true);
 }
 
+void print_fsinfo()
+{
+    const filesystem::VolumeInfo& info =
+        filesystem::volume_info();
+
+    vga::write("FAT32 filesystem:\n");
+
+    vga::write("  Mounted: ");
+    vga::write(info.mounted ? "yes\n" : "no\n");
+
+    vga::write("  Device: ATA test/slave disk\n");
+
+    vga::write("  Bytes/sector: ");
+    vga::write_uint(info.bytes_per_sector);
+    vga::put_char('\n');
+
+    vga::write("  Sectors/cluster: ");
+    vga::write_uint(info.sectors_per_cluster);
+    vga::put_char('\n');
+
+    vga::write("  FAT count: ");
+    vga::write_uint(info.fat_count);
+    vga::put_char('\n');
+
+    vga::write("  Sectors/FAT: ");
+    vga::write_uint(info.sectors_per_fat);
+    vga::put_char('\n');
+
+    vga::write("  Total sectors: ");
+    vga::write_uint(info.total_sectors);
+    vga::put_char('\n');
+
+    vga::write("  Root cluster: ");
+    vga::write_uint(info.root_cluster);
+    vga::put_char('\n');
+
+    vga::write("  Mode: read-only\n");
+}
+
+bool print_entry(
+    const filesystem::Entry& entry,
+    void*)
+{
+    vga::write(entry.name);
+
+    if (entry.is_directory) {
+        vga::put_char('/');
+    }
+
+    vga::put_char('\n');
+    return true;
+}
+
+void print_ls(const char* path)
+{
+    const char* const target =
+        path != nullptr ? path : "/";
+
+    const filesystem::Status status =
+        filesystem::list_directory(
+            target,
+            print_entry,
+            nullptr);
+
+    if (status == filesystem::Status::Ok) {
+        return;
+    }
+
+    vga::write("ls: ");
+
+    if (status == filesystem::Status::NotFound) {
+        vga::write("not found");
+    } else if (status == filesystem::Status::NotDirectory) {
+        vga::write("not a directory");
+    } else if (status == filesystem::Status::NotMounted) {
+        vga::write("filesystem not mounted");
+    } else if (status == filesystem::Status::Corrupt) {
+        vga::write("filesystem corrupt");
+    } else if (status == filesystem::Status::IoError) {
+        vga::write("I/O error");
+    } else {
+        vga::write("unable to list directory");
+    }
+
+    vga::put_char('\n');
+}
+
+void print_cat(const char* path)
+{
+    if (path == nullptr ||
+        path[0] == '\0') {
+        vga::write("Usage: cat <path>\n");
+        return;
+    }
+
+    uint8_t buffer[128];
+    uint32_t offset = 0;
+
+    for (;;) {
+        size_t got = 0;
+        uint32_t size = 0;
+
+        const filesystem::Status status =
+            filesystem::read_file(
+                path,
+                offset,
+                buffer,
+                sizeof(buffer),
+                got,
+                size);
+
+        if (status != filesystem::Status::Ok) {
+            vga::write("cat: ");
+
+            if (status == filesystem::Status::NotFound) {
+                vga::write("not found");
+            } else if (status == filesystem::Status::IsDirectory) {
+                vga::write("is a directory");
+            } else if (status == filesystem::Status::NotDirectory) {
+                vga::write("path component is not a directory");
+            } else if (status == filesystem::Status::NotMounted) {
+                vga::write("filesystem not mounted");
+            } else if (status == filesystem::Status::Corrupt) {
+                vga::write("filesystem corrupt");
+            } else if (status == filesystem::Status::IoError) {
+                vga::write("I/O error");
+            } else {
+                vga::write("unable to read file");
+            }
+
+            vga::put_char('\n');
+            return;
+        }
+
+        for (size_t i = 0;
+             i < got;
+             ++i) {
+            vga::put_char(
+                static_cast<char>(
+                    buffer[i]));
+        }
+
+        offset +=
+            static_cast<uint32_t>(got);
+
+        if (got == 0 ||
+            offset >= size) {
+            break;
+        }
+    }
+}
+
 void reboot()
 {
     vga::write("Rebooting...\n");
@@ -141,23 +332,41 @@ void reboot()
     vga::write("Keyboard controller stayed busy; reboot cancelled.\n");
 }
 
-void execute(const char* command)
+void execute(char* command)
 {
-    if (command[0] == '\0') return;
-    if (equals(command, "help")) { print_help(); return; }
-    if (equals(command, "clear")) { vga::clear(); return; }
-    if (equals(command, "version")) { print_version(); return; }
-    if (equals(command, "mem")) { print_memory(); return; }
-    if (equals(command, "diskinfo")) { print_diskinfo(); return; }
-    if (equals(command, "uptime")) {
+    ParsedCommand parsed =
+        parse_command(command);
+
+    if (parsed.name[0] == '\0') {
+        return;
+    }
+
+    if (equals(parsed.name, "help")) { print_help(); return; }
+    if (equals(parsed.name, "clear")) { vga::clear(); return; }
+    if (equals(parsed.name, "version")) { print_version(); return; }
+    if (equals(parsed.name, "mem")) { print_memory(); return; }
+    if (equals(parsed.name, "diskinfo")) { print_diskinfo(); return; }
+    if (equals(parsed.name, "fsinfo")) { print_fsinfo(); return; }
+    if (equals(parsed.name, "ls")) {
+        print_ls(parsed.argument);
+        return;
+    }
+
+    if (equals(parsed.name, "cat")) {
+        print_cat(parsed.argument);
+        return;
+    }
+
+    if (equals(parsed.name, "uptime")) {
         vga::write("Uptime: ");
         vga::write_uint(pit::uptime_seconds());
         vga::write(" seconds\n");
         return;
     }
-    if (equals(command, "reboot")) { reboot(); return; }
+    if (equals(parsed.name, "reboot")) { reboot(); return; }
+
     vga::write("Unknown command: ");
-    vga::write(command);
+    vga::write(parsed.name);
     vga::write("\nType 'help' for commands.\n");
 }
 
