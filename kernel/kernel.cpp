@@ -1,4 +1,5 @@
 #include "boot_info.hpp"
+#include "graphics/framebuffer.hpp"
 
 #include "arch/debug.hpp"
 #include "arch/io.hpp"
@@ -108,6 +109,27 @@ extern "C" [[noreturn]] void linux95_higher_half_entry(
         panic::halt("Memory self-test failed");
     }
     debug::write("[PASS] memory_self_test\n");
+
+    // The memory self-test owns a temporary VA inside the graphics
+    // address region. Run it first, then install the persistent
+    // framebuffer MMIO mapping.
+    const graphics::FramebufferInitResult framebuffer_result =
+        graphics::initialize_framebuffer(*boot_info);
+
+    if (framebuffer_result ==
+        graphics::FramebufferInitResult::Ready) {
+        debug::write("[PASS] framebuffer_mapped\n");
+    } else if (framebuffer_result ==
+               graphics::FramebufferInitResult::Unavailable) {
+        debug::write("[INFO] framebuffer_unavailable\n");
+    } else if (framebuffer_result ==
+               graphics::FramebufferInitResult::InvalidMetadata) {
+        debug::write("[PANIC] framebuffer_invalid\n");
+        panic::halt("Framebuffer metadata invalid");
+    } else {
+        debug::write("[PANIC] framebuffer_mapping\n");
+        panic::halt("Framebuffer mapping failed");
+    }
 
     if (!storage::self_test::run()) {
         debug::write("[PANIC] storage_self_test\n");

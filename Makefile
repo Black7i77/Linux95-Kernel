@@ -47,7 +47,7 @@ KERNEL_OBJS := \
 	$(BUILD)/interrupts_asm.o \
 	$(BUILD)/paging_bootstrap.o \
 	$(BUILD)/kernel.o \
-	$(BUILD)/vga.o \
+	$(BUILD)/vga.o $(BUILD)/framebuffer.o \
 	$(BUILD)/panic.o \
 	$(BUILD)/interrupts.o \
 	$(BUILD)/pic.o \
@@ -115,6 +115,9 @@ $(BUILD)/kernel.o: \
 	kernel/boot_info.hpp \
 	kernel/filesystem/vfs.hpp \
 	kernel/filesystem/vfs_self_test.hpp | $(BUILD)
+>$(CXX) $(CXXFLAGS) -c $< -o $@
+
+$(BUILD)/framebuffer.o: kernel/graphics/framebuffer.cpp kernel/graphics/framebuffer.hpp kernel/graphics/framebuffer_helpers.hpp kernel/boot_info.hpp kernel/memory/paging.hpp | $(BUILD)
 >$(CXX) $(CXXFLAGS) -c $< -o $@
 
 $(BUILD)/vga.o: kernel/terminal/vga.cpp kernel/terminal/vga.hpp kernel/arch/io.hpp | $(BUILD)
