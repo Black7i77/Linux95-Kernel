@@ -47,7 +47,7 @@ KERNEL_OBJS := \
 	$(BUILD)/interrupts_asm.o \
 	$(BUILD)/paging_bootstrap.o \
 	$(BUILD)/kernel.o \
-	$(BUILD)/vga.o $(BUILD)/framebuffer.o $(BUILD)/renderer.o \
+	$(BUILD)/vga.o $(BUILD)/vga_output.o $(BUILD)/shell_session.o $(BUILD)/framebuffer.o $(BUILD)/renderer.o \
 	$(BUILD)/panic.o \
 	$(BUILD)/interrupts.o \
 	$(BUILD)/pic.o \
@@ -126,6 +126,12 @@ $(BUILD)/framebuffer.o: kernel/graphics/framebuffer.cpp kernel/graphics/framebuf
 >$(CXX) $(CXXFLAGS) -c $< -o $@
 
 $(BUILD)/vga.o: kernel/terminal/vga.cpp kernel/terminal/vga.hpp kernel/arch/io.hpp | $(BUILD)
+>$(CXX) $(CXXFLAGS) -c $< -o $@
+
+$(BUILD)/vga_output.o: kernel/terminal/vga_output.cpp kernel/terminal/vga_output.hpp kernel/terminal/output.hpp kernel/terminal/vga.hpp | $(BUILD)
+>$(CXX) $(CXXFLAGS) -c $< -o $@
+
+$(BUILD)/shell_session.o: kernel/terminal/shell_session.cpp kernel/terminal/shell_session.hpp kernel/terminal/output.hpp | $(BUILD)
 >$(CXX) $(CXXFLAGS) -c $< -o $@
 
 $(BUILD)/panic.o: kernel/panic/panic.cpp kernel/panic/panic.hpp | $(BUILD)
@@ -356,3 +362,13 @@ test-host-mouse-helpers: $(BUILD)/host-mouse-helpers-test
 >$(BUILD)/host-mouse-helpers-test
 
 test-host-graphics: test-host-mouse-helpers
+
+.PHONY: test-host-shell-session
+
+$(BUILD)/host-shell-session-test: tests/host/shell_session_test.cpp kernel/terminal/output.hpp kernel/terminal/shell_session.hpp kernel/terminal/shell_session.cpp | $(BUILD)
+>$(CXX) $(HOST_CXXFLAGS) tests/host/shell_session_test.cpp kernel/terminal/shell_session.cpp -o $@
+
+test-host-shell-session: $(BUILD)/host-shell-session-test
+>$(BUILD)/host-shell-session-test
+
+test-host-graphics: test-host-shell-session
