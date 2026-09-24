@@ -382,3 +382,13 @@ test-host-window-manager: $(BUILD)/host-window-manager-test
 >$(BUILD)/host-window-manager-test
 
 test-host-graphics: test-host-window-manager
+
+.PHONY: test-host-terminal-model
+
+$(BUILD)/host-terminal-model-test: tests/host/terminal_model_test.cpp kernel/gui/terminal_model.hpp kernel/gui/terminal_model.cpp kernel/terminal/output.hpp | $(BUILD)
+>$(CXX) $(HOST_CXXFLAGS) tests/host/terminal_model_test.cpp kernel/gui/terminal_model.cpp -o $@
+
+test-host-terminal-model: $(BUILD)/host-terminal-model-test
+>$(BUILD)/host-terminal-model-test
+
+test-host-graphics: test-host-terminal-model
