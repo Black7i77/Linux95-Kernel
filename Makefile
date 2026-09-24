@@ -162,7 +162,14 @@ test-host-storage: $(BUILD)/host-ata-helpers-test
 $(BUILD)/host-fat32-helpers-test: tests/host/fat32_helpers_test.cpp | $(BUILD)
 >$(CXX) $(HOST_CXXFLAGS) $< -o $@
 
-$(BUILD)/host-fat32-mount-test: tests/host/fat32_mount_test.cpp | $(BUILD)
+$(BUILD)/host-fat32-mount-test: \
+	tests/host/fat32_mount_test.cpp \
+	kernel/filesystem/fat32.cpp \
+	kernel/filesystem/fat32.hpp \
+	kernel/filesystem/fat32_helpers.hpp \
+	kernel/filesystem/filesystem.cpp \
+	kernel/filesystem/filesystem.hpp \
+	kernel/storage/disk.hpp | $(BUILD)
 >$(CXX) $(HOST_CXXFLAGS) tests/host/fat32_mount_test.cpp kernel/filesystem/fat32.cpp kernel/filesystem/filesystem.cpp -o $@
 
 test-host-filesystem: $(BUILD)/host-fat32-helpers-test $(BUILD)/host-fat32-mount-test

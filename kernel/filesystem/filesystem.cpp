@@ -24,6 +24,34 @@ bool initialize()
     return true;
 }
 
+Status list_directory(
+    const char* path,
+    EntryVisitor visitor,
+    void* context)
+{
+    return fat32::list_directory(
+        path,
+        visitor,
+        context);
+}
+
+Status read_file(
+    const char* path,
+    uint32_t offset,
+    uint8_t* buffer,
+    size_t buffer_size,
+    size_t& bytes_read,
+    uint32_t& file_size)
+{
+    return fat32::read_file(
+        path,
+        offset,
+        buffer,
+        buffer_size,
+        bytes_read,
+        file_size);
+}
+
 const VolumeInfo& volume_info()
 {
     return current_volume;

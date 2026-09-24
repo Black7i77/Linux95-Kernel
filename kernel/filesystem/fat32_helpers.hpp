@@ -385,4 +385,174 @@ inline bool parse_bpb(
     return true;
 }
 
+
+enum class DirectoryEntryKind : uint8_t {
+    Normal,
+    Skip,
+    End,
+};
+
+struct DirectoryEntry {
+    char name[13];
+    bool is_directory;
+    uint32_t first_cluster;
+    uint32_t size;
+};
+
+inline DirectoryEntryKind decode_directory_entry(
+    const uint8_t raw[32],
+    DirectoryEntry& out)
+{
+    if (raw == nullptr) {
+        return DirectoryEntryKind::Skip;
+    }
+
+    if (raw[0] == 0x00) {
+        return DirectoryEntryKind::End;
+    }
+
+    if (raw[0] == 0xE5) {
+        return DirectoryEntryKind::Skip;
+    }
+
+    const uint8_t attributes = raw[11];
+
+    if (attributes == 0x0F) {
+        return DirectoryEntryKind::Skip;
+    }
+
+    if ((attributes & 0x08u) != 0) {
+        return DirectoryEntryKind::Skip;
+    }
+
+    if (!format_short_name(raw, out.name)) {
+        return DirectoryEntryKind::Skip;
+    }
+
+    out.is_directory =
+        (attributes & 0x10u) != 0;
+
+    const uint32_t cluster_high =
+        static_cast<uint32_t>(le16(raw + 20));
+
+    const uint32_t cluster_low =
+        static_cast<uint32_t>(le16(raw + 26));
+
+    out.first_cluster =
+        (cluster_high << 16) | cluster_low;
+
+    out.size = le32(raw + 28);
+
+    return DirectoryEntryKind::Normal;
+}
+
+inline bool valid_path(const char* path)
+{
+    if (path == nullptr || *path == '\0') {
+        return false;
+    }
+
+    const char* component = path;
+    size_t component_length = 0;
+
+    for (const char* p = path;; ++p) {
+        const char c = *p;
+
+        if (c == '/' || c == '\0') {
+            if (component_length == 0) {
+                return false;
+            }
+
+            if (!valid_path_component(
+                    component,
+                    component_length)) {
+                return false;
+            }
+
+            if (c == '\0') {
+                return true;
+            }
+
+            component = p + 1;
+            component_length = 0;
+            continue;
+        }
+
+        ++component_length;
+
+        if (component_length > 12) {
+            return false;
+        }
+    }
+}
+
+
+enum class FatEntryKind : uint8_t {
+    Free,
+    Reserved,
+    Next,
+    Bad,
+    EndOfChain,
+};
+
+inline uint32_t fat_entry_value(uint32_t raw)
+{
+    return fat28(raw);
+}
+
+inline FatEntryKind classify_fat_entry(uint32_t raw)
+{
+    const uint32_t value = fat_entry_value(raw);
+
+    if (value == 0x00000000u) {
+        return FatEntryKind::Free;
+    }
+
+    if (value == 0x00000001u) {
+        return FatEntryKind::Reserved;
+    }
+
+    if (value >= 0x0FFFFFF0u &&
+        value <= 0x0FFFFFF6u) {
+        return FatEntryKind::Reserved;
+    }
+
+    if (value == 0x0FFFFFF7u) {
+        return FatEntryKind::Bad;
+    }
+
+    if (value >= 0x0FFFFFF8u) {
+        return FatEntryKind::EndOfChain;
+    }
+
+    return FatEntryKind::Next;
+}
+
+inline bool fat_entry_location(
+    uint32_t cluster,
+    uint32_t fat_begin_lba,
+    uint32_t& sector,
+    uint16_t& inside)
+{
+    uint32_t offset = 0;
+
+    if (!checked_mul_u32(cluster, 4u, offset)) {
+        return false;
+    }
+
+    const uint32_t sector_offset = offset / 512u;
+
+    if (!checked_add_u32(
+            fat_begin_lba,
+            sector_offset,
+            sector)) {
+        return false;
+    }
+
+    inside =
+        static_cast<uint16_t>(offset % 512u);
+
+    return true;
+}
+
 } // namespace linux95::filesystem::fat32::helpers
