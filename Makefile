@@ -48,6 +48,7 @@ KERNEL_OBJS := \
 	$(BUILD)/paging_bootstrap.o \
 	$(BUILD)/kernel.o \
 	$(BUILD)/vga.o $(BUILD)/vga_output.o $(BUILD)/shell_session.o $(BUILD)/framebuffer.o $(BUILD)/renderer.o \
+        $(BUILD)/terminal_model.o $(BUILD)/terminal_app.o \
 	$(BUILD)/panic.o \
 	$(BUILD)/interrupts.o \
 	$(BUILD)/pic.o \
@@ -120,6 +121,12 @@ $(BUILD)/kernel.o: \
 >$(CXX) $(CXXFLAGS) -c $< -o $@
 
 $(BUILD)/renderer.o: kernel/graphics/renderer.cpp kernel/graphics/renderer.hpp kernel/graphics/font8x8.hpp kernel/graphics/framebuffer.hpp | $(BUILD)
+>$(CXX) $(CXXFLAGS) -c $< -o $@
+
+$(BUILD)/terminal_model.o: kernel/gui/terminal_model.cpp kernel/gui/terminal_model.hpp kernel/terminal/output.hpp | $(BUILD)
+>$(CXX) $(CXXFLAGS) -c $< -o $@
+
+$(BUILD)/terminal_app.o: kernel/gui/terminal_app.cpp kernel/gui/terminal_app.hpp kernel/gui/app.hpp kernel/gui/terminal_model.hpp kernel/terminal/shell_session.hpp kernel/terminal/shell.hpp kernel/graphics/renderer.hpp | $(BUILD)
 >$(CXX) $(CXXFLAGS) -c $< -o $@
 
 $(BUILD)/framebuffer.o: kernel/graphics/framebuffer.cpp kernel/graphics/framebuffer.hpp kernel/graphics/framebuffer_helpers.hpp kernel/boot_info.hpp kernel/memory/paging.hpp | $(BUILD)
