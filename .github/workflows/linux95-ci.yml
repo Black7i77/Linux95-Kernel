@@ -5,6 +5,7 @@ on:
     branches:
       - v1.0-dev
       - v1.0-storage-dev
+      - v1.0-fat32-dev
   pull_request:
     branches:
       - v1.0-dev
@@ -34,7 +35,9 @@ jobs:
             nasm \
             binutils \
             qemu-system-x86 \
-            python3
+            python3 \
+            dosfstools \
+            mtools
 
       - name: Clean
         run: make clean

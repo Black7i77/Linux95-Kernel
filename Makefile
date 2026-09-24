@@ -213,11 +213,13 @@ $(BUILD)/linux95-kernel.img: \
 >@ls -lh $@
 
 $(STORAGE_TEST_IMAGE): | $(BUILD)
->dd if=/dev/zero of=$@ bs=1M count=16 status=none
+>$(PYTHON) tests/prepare_fat32_image.py $@
 
 prepare-storage-test-image: | $(BUILD)
->rm -f $(STORAGE_TEST_IMAGE)
->dd if=/dev/zero of=$(STORAGE_TEST_IMAGE) bs=1M count=16 status=none
+>@for tool in mkfs.fat mmd mcopy; do \
+	command -v $$tool >/dev/null || { echo "Missing tool: $$tool"; exit 1; }; \
+done
+>$(PYTHON) tests/prepare_fat32_image.py $(STORAGE_TEST_IMAGE)
 
 test-memory-source:
 >$(PYTHON) tests/memory_source_checks.py
