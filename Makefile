@@ -47,7 +47,7 @@ KERNEL_OBJS := \
 	$(BUILD)/interrupts_asm.o \
 	$(BUILD)/paging_bootstrap.o \
 	$(BUILD)/kernel.o \
-	$(BUILD)/vga.o $(BUILD)/framebuffer.o \
+	$(BUILD)/vga.o $(BUILD)/framebuffer.o $(BUILD)/renderer.o \
 	$(BUILD)/panic.o \
 	$(BUILD)/interrupts.o \
 	$(BUILD)/pic.o \
@@ -115,6 +115,9 @@ $(BUILD)/kernel.o: \
 	kernel/boot_info.hpp \
 	kernel/filesystem/vfs.hpp \
 	kernel/filesystem/vfs_self_test.hpp | $(BUILD)
+>$(CXX) $(CXXFLAGS) -c $< -o $@
+
+$(BUILD)/renderer.o: kernel/graphics/renderer.cpp kernel/graphics/renderer.hpp kernel/graphics/font8x8.hpp kernel/graphics/framebuffer.hpp | $(BUILD)
 >$(CXX) $(CXXFLAGS) -c $< -o $@
 
 $(BUILD)/framebuffer.o: kernel/graphics/framebuffer.cpp kernel/graphics/framebuffer.hpp kernel/graphics/framebuffer_helpers.hpp kernel/boot_info.hpp kernel/memory/paging.hpp | $(BUILD)
@@ -325,3 +328,12 @@ run-debug: all prepare-storage-test-image
 
 clean:
 >rm -rf $(BUILD)
+
+$(BUILD)/host-renderer-test: tests/host/renderer_test.cpp kernel/graphics/renderer.cpp kernel/graphics/renderer.hpp kernel/graphics/font8x8.hpp kernel/graphics/framebuffer.hpp | $(BUILD)
+>$(CXX) $(HOST_CXXFLAGS) tests/host/renderer_test.cpp kernel/graphics/renderer.cpp -o $@
+
+test-host-renderer: $(BUILD)/host-renderer-test
+>$(BUILD)/host-renderer-test
+
+.PHONY: test-host-renderer
+test-host-graphics: test-host-renderer
