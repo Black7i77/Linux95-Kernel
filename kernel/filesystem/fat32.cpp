@@ -347,119 +347,15 @@ Status find_entry(
     return Status::Corrupt;
 }
 
-} // namespace
-
-Status list_directory(
+Status resolve_entry(
     const char* path,
-    EntryVisitor visitor,
-    void* context)
+    helpers::DirectoryEntry& entry)
 {
     if (!mounted) {
         return Status::NotMounted;
     }
 
-    if (visitor == nullptr || path == nullptr) {
-        return Status::Unsupported;
-    }
-
-    if (path[0] == '/' && path[1] == '\0') {
-        return emit_directory(
-            root_cluster,
-            visitor,
-            context);
-    }
-
-    const char* cursor = path;
-
-    if (*cursor == '/') {
-        ++cursor;
-    }
-
-    if (*cursor == '\0' ||
-        !helpers::valid_path(cursor)) {
-        return Status::Unsupported;
-    }
-
-    uint32_t directory_cluster = root_cluster;
-
-    while (*cursor != '\0') {
-        char component[13];
-        uint32_t length = 0;
-
-        while (cursor[length] != '\0' &&
-               cursor[length] != '/') {
-
-            if (length >= 12) {
-                return Status::Unsupported;
-            }
-
-            component[length] = cursor[length];
-            ++length;
-        }
-
-        component[length] = '\0';
-
-        helpers::DirectoryEntry entry;
-
-        const Status status =
-            find_entry(
-                directory_cluster,
-                component,
-                entry);
-
-        if (status != Status::Ok) {
-            return status;
-        }
-
-        cursor += length;
-
-        const bool final_component =
-            (*cursor == '\0');
-
-        if (!entry.is_directory) {
-            return Status::NotDirectory;
-        }
-
-        if (!valid_data_cluster(
-                entry.first_cluster)) {
-            return Status::Corrupt;
-        }
-
-        directory_cluster =
-            entry.first_cluster;
-
-        if (final_component) {
-            return emit_directory(
-                directory_cluster,
-                visitor,
-                context);
-        }
-
-        // Skip the slash separating components.
-        ++cursor;
-    }
-
-    return Status::Unsupported;
-}
-
-
-Status read_file(
-    const char* path,
-    uint32_t offset,
-    uint8_t* buffer,
-    size_t buffer_size,
-    size_t& bytes_read,
-    uint32_t& file_size)
-{
-    bytes_read = 0;
-    file_size = 0;
-
-    if (!mounted) {
-        return Status::NotMounted;
-    }
-
-    if (path == nullptr ||
-        buffer == nullptr) {
+    if (path == nullptr) {
         return Status::Unsupported;
     }
 
@@ -477,15 +373,12 @@ Status read_file(
     uint32_t directory_cluster =
         root_cluster;
 
-    helpers::DirectoryEntry entry;
-
     while (*cursor != '\0') {
         char component[13];
         uint32_t length = 0;
 
         while (cursor[length] != '\0' &&
                cursor[length] != '/') {
-
             if (length >= 12) {
                 return Status::Unsupported;
             }
@@ -498,23 +391,20 @@ Status read_file(
 
         component[length] = '\0';
 
-        const Status lookup =
+        const Status status =
             find_entry(
                 directory_cluster,
                 component,
                 entry);
 
-        if (lookup != Status::Ok) {
-            return lookup;
+        if (status != Status::Ok) {
+            return status;
         }
 
         cursor += length;
 
-        const bool final_component =
-            (*cursor == '\0');
-
-        if (final_component) {
-            break;
+        if (*cursor == '\0') {
+            return Status::Ok;
         }
 
         if (!entry.is_directory) {
@@ -530,6 +420,317 @@ Status read_file(
             entry.first_cluster;
 
         ++cursor;
+    }
+
+    return Status::Unsupported;
+}
+
+Status resolve_directory_cluster(
+    const char* path,
+    uint32_t& directory_cluster)
+{
+    if (!mounted) {
+        return Status::NotMounted;
+    }
+
+    if (path == nullptr) {
+        return Status::Unsupported;
+    }
+
+    if (path[0] == '/' &&
+        path[1] == '\0') {
+        directory_cluster =
+            root_cluster;
+        return Status::Ok;
+    }
+
+    helpers::DirectoryEntry entry = {};
+
+    const Status status =
+        resolve_entry(
+            path,
+            entry);
+
+    if (status != Status::Ok) {
+        return status;
+    }
+
+    if (!entry.is_directory) {
+        return Status::NotDirectory;
+    }
+
+    if (!valid_data_cluster(
+            entry.first_cluster)) {
+        return Status::Corrupt;
+    }
+
+    directory_cluster =
+        entry.first_cluster;
+
+    return Status::Ok;
+}
+
+Status read_directory_entry_at(
+    uint32_t first_cluster,
+    uint32_t index,
+    Entry& entry,
+    bool& end)
+{
+    uint32_t cluster =
+        first_cluster;
+
+    uint32_t logical_index = 0;
+
+    for (uint32_t walked = 0;
+         walked < cluster_count;
+         ++walked) {
+
+        if (!valid_data_cluster(cluster)) {
+            return Status::Corrupt;
+        }
+
+        uint32_t cluster_lba = 0;
+
+        if (!helpers::cluster_to_lba(
+                first_data_lba,
+                sectors_per_cluster,
+                cluster,
+                cluster_lba)) {
+            return Status::Corrupt;
+        }
+
+        for (uint32_t sector_index = 0;
+             sector_index < sectors_per_cluster;
+             ++sector_index) {
+
+            uint32_t lba = 0;
+
+            if (!helpers::checked_add_u32(
+                    cluster_lba,
+                    sector_index,
+                    lba)) {
+                return Status::Corrupt;
+            }
+
+            uint8_t sector[512];
+
+            if (!storage::read_sector(
+                    storage::DiskId::Test,
+                    lba,
+                    sector)) {
+                return Status::IoError;
+            }
+
+            for (uint32_t offset = 0;
+                 offset < 512;
+                 offset += 32) {
+
+                helpers::DirectoryEntry decoded = {};
+
+                const helpers::DirectoryEntryKind kind =
+                    helpers::decode_directory_entry(
+                        sector + offset,
+                        decoded);
+
+                if (kind ==
+                    helpers::DirectoryEntryKind::End) {
+                    end = true;
+                    return Status::Ok;
+                }
+
+                if (kind ==
+                    helpers::DirectoryEntryKind::Skip) {
+                    continue;
+                }
+
+                if (logical_index == index) {
+                    for (uint32_t i = 0;
+                         i < 13;
+                         ++i) {
+                        entry.name[i] =
+                            decoded.name[i];
+                    }
+
+                    entry.is_directory =
+                        decoded.is_directory;
+
+                    entry.size =
+                        decoded.size;
+
+                    end = false;
+                    return Status::Ok;
+                }
+
+                ++logical_index;
+            }
+        }
+
+        uint32_t next = 0;
+        bool eoc = false;
+
+        const Status status =
+            next_cluster(
+                cluster,
+                next,
+                eoc);
+
+        if (status != Status::Ok) {
+            return status;
+        }
+
+        if (eoc) {
+            end = true;
+            return Status::Ok;
+        }
+
+        cluster = next;
+    }
+
+    return Status::Corrupt;
+}
+
+} // namespace
+
+Status list_directory(
+    const char* path,
+    EntryVisitor visitor,
+    void* context)
+{
+    if (!mounted) {
+        return Status::NotMounted;
+    }
+
+    if (visitor == nullptr) {
+        return Status::Unsupported;
+    }
+
+    uint32_t directory_cluster = 0;
+
+    const Status status =
+        resolve_directory_cluster(
+            path,
+            directory_cluster);
+
+    if (status != Status::Ok) {
+        return status;
+    }
+
+    return emit_directory(
+        directory_cluster,
+        visitor,
+        context);
+}
+
+
+Status stat_path(
+    const char* path,
+    Entry& out)
+{
+    if (!mounted) {
+        return Status::NotMounted;
+    }
+
+    if (path == nullptr) {
+        return Status::Unsupported;
+    }
+
+    if (path[0] == '/' &&
+        path[1] == '\0') {
+        out.name[0] = '/';
+        out.name[1] = '\0';
+
+        for (uint32_t i = 2;
+             i < 13;
+             ++i) {
+            out.name[i] = '\0';
+        }
+
+        out.is_directory = true;
+        out.size = 0;
+        return Status::Ok;
+    }
+
+    helpers::DirectoryEntry resolved = {};
+
+    const Status status =
+        resolve_entry(
+            path,
+            resolved);
+
+    if (status != Status::Ok) {
+        return status;
+    }
+
+    for (uint32_t i = 0;
+         i < 13;
+         ++i) {
+        out.name[i] =
+            resolved.name[i];
+    }
+
+    out.is_directory =
+        resolved.is_directory;
+
+    out.size =
+        resolved.size;
+
+    return Status::Ok;
+}
+
+Status read_directory_entry(
+    const char* path,
+    uint32_t index,
+    Entry& entry,
+    bool& end)
+{
+    end = false;
+
+    uint32_t directory_cluster = 0;
+
+    const Status status =
+        resolve_directory_cluster(
+            path,
+            directory_cluster);
+
+    if (status != Status::Ok) {
+        return status;
+    }
+
+    return read_directory_entry_at(
+        directory_cluster,
+        index,
+        entry,
+        end);
+}
+
+Status read_file(
+    const char* path,
+    uint32_t offset,
+    uint8_t* buffer,
+    size_t buffer_size,
+    size_t& bytes_read,
+    uint32_t& file_size)
+{
+    bytes_read = 0;
+    file_size = 0;
+
+    if (!mounted) {
+        return Status::NotMounted;
+    }
+
+    if (buffer == nullptr) {
+        return Status::Unsupported;
+    }
+
+    helpers::DirectoryEntry entry = {};
+
+    const Status lookup =
+        resolve_entry(
+            path,
+            entry);
+
+    if (lookup != Status::Ok) {
+        return lookup;
     }
 
     if (entry.is_directory) {

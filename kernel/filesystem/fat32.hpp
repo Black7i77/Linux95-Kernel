@@ -11,6 +11,16 @@ Status list_directory(
     EntryVisitor visitor,
     void* context);
 
+Status stat_path(
+    const char* path,
+    Entry& entry);
+
+Status read_directory_entry(
+    const char* path,
+    uint32_t index,
+    Entry& entry,
+    bool& end);
+
 Status read_file(
     const char* path,
     uint32_t offset,

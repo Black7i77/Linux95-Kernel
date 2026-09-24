@@ -35,6 +35,28 @@ Status list_directory(
         context);
 }
 
+Status stat_path(
+    const char* path,
+    Entry& entry)
+{
+    return fat32::stat_path(
+        path,
+        entry);
+}
+
+Status read_directory_entry(
+    const char* path,
+    uint32_t index,
+    Entry& entry,
+    bool& end)
+{
+    return fat32::read_directory_entry(
+        path,
+        index,
+        entry,
+        end);
+}
+
 Status read_file(
     const char* path,
     uint32_t offset,

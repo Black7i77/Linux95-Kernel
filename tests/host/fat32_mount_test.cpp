@@ -348,6 +348,65 @@ int main()
 
     make_root_directory();
 
+    filesystem::Entry metadata = {};
+
+    assert(filesystem::stat_path(
+        "/README.TXT",
+        metadata) == filesystem::Status::Ok);
+    assert(!metadata.is_directory);
+    assert(metadata.size == 34u);
+
+    assert(filesystem::stat_path(
+        "DOCS",
+        metadata) == filesystem::Status::Ok);
+    assert(metadata.is_directory);
+
+    assert(filesystem::stat_path(
+        "/",
+        metadata) == filesystem::Status::Ok);
+    assert(metadata.is_directory);
+    assert(metadata.size == 0u);
+
+    assert(filesystem::stat_path(
+        "/MISSING.TXT",
+        metadata) == filesystem::Status::NotFound);
+
+    filesystem::Entry indexed = {};
+    bool end = true;
+
+    assert(filesystem::read_directory_entry(
+        "/",
+        0,
+        indexed,
+        end) == filesystem::Status::Ok);
+    assert(!end);
+    assert(indexed.name[0] != '\0');
+
+    uint32_t indexed_root_entries = 0;
+
+    for (;;) {
+        assert(filesystem::read_directory_entry(
+            "/",
+            indexed_root_entries,
+            indexed,
+            end) == filesystem::Status::Ok);
+
+        if (end) {
+            break;
+        }
+
+        ++indexed_root_entries;
+        assert(indexed_root_entries < 16u);
+    }
+
+    assert(indexed_root_entries == 3u);
+
+    assert(filesystem::read_directory_entry(
+        "/README.TXT",
+        0,
+        indexed,
+        end) == filesystem::Status::NotDirectory);
+
     int root_entries = 0;
 
     assert(filesystem::list_directory(

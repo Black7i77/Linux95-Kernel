@@ -15,6 +15,10 @@ enum class Status : uint8_t {
     IsDirectory,
     Corrupt,
     Unsupported,
+    InvalidDescriptor,
+    InvalidHandle,
+    TooManyOpenFiles,
+    TooManyOpenDirectories,
 };
 
 struct Entry {
@@ -43,6 +47,16 @@ Status list_directory(
     const char* path,
     EntryVisitor visitor,
     void* context);
+
+Status stat_path(
+    const char* path,
+    Entry& entry);
+
+Status read_directory_entry(
+    const char* path,
+    uint32_t index,
+    Entry& entry,
+    bool& end);
 
 Status read_file(
     const char* path,
