@@ -2,9 +2,9 @@
 
 Linux95 Kernel is an experimental x86_64 freestanding C++ kernel with a custom legacy BIOS bootloader.
 
-## v1.0 Storage Foundation (development milestone)
+## v1.0 VFS Foundation (development milestone)
 
-This branch builds on the proven `v1.0-memory-foundation` checkpoint and adds the first Linux95 storage subsystem while preserving the higher-half memory architecture.
+This branch builds on the Linux95 storage and FAT32 foundation and adds the first read-only virtual filesystem (VFS) while preserving the higher-half memory architecture.
 
 Verified architecture in this milestone:
 
@@ -31,7 +31,19 @@ Verified architecture in this milestone:
 - root and subdirectory traversal
 - bounded multi-cluster FAT-chain reads
 - FAT32 boot-time filesystem self-tests
-- FAT/filesystem path is intentionally read-only in this milestone
+- read-only VFS layered above the filesystem/FAT32 backend
+- regular-file descriptors `3..63`; fd `0`, `1`, and `2` remain reserved
+- exactly 61 simultaneous regular-file descriptors
+- separate 32-slot directory-handle table
+- VFS `open` / `read` / `close` / `stat` / `fstat`
+- VFS `opendir` / `readdir` / `closedir`
+- lowest-free descriptor and directory-handle reuse
+- per-descriptor file offsets with successful-read-only advancement
+- stable directory cursor on backend error and EOF
+- maximum VFS path length of 127 characters plus terminator
+- shell `ls` and `cat` file access routed exclusively through VFS
+- VFS boot-time self-tests
+- FAT/filesystem/VFS path is intentionally read-only in this milestone
 - IDT and exception handling
 - legacy PIC + 100 Hz PIT
 - interrupt-driven PS/2 keyboard
@@ -59,9 +71,9 @@ The Linux95 boot image is attached as the primary IDE master and is treated as r
 
 `fsinfo` reports the mounted FAT32 geometry and read-only mode.
 
-`ls [path]` lists DOS 8.3 entries in the FAT32 root or a subdirectory. `ls` with no path lists `/`.
+`ls [path]` opens directories through the read-only VFS and lists DOS 8.3 entries one at a time with `readdir`. `ls` with no path lists `/`.
 
-`cat <path>` reads a file through the read-only filesystem layer in bounded chunks. Examples include `cat README.TXT` and `cat DOCS/KERNEL.TXT`.
+`cat <path>` opens and reads files through VFS file descriptors in bounded chunks. Examples include `cat README.TXT` and `cat DOCS/KERNEL.TXT`.
 
 ## Build and verify
 
@@ -110,12 +122,19 @@ The automated QEMU test requires the memory checkpoints plus these storage check
 [PASS] fat32_subdirectory
 [PASS] fat32_cluster_chain
 [PASS] filesystem_self_test
+[PASS] vfs_initialize
+[PASS] vfs_file_open
+[PASS] vfs_file_read
+[PASS] vfs_stat
+[PASS] vfs_directory_open
+[PASS] vfs_readdir
+[PASS] vfs_self_test
 [PASS] shell_ready
 ```
 
 ## Scope
 
-This is still a small standalone experimental kernel. The FAT32 layer is intentionally read-only and limited to DOS 8.3 names. It does **not** include writable FAT operations, long file names, partition parsing, AHCI, DMA, IRQ-driven ATA, NVMe, USB storage, networking, audio, SMP, user mode, processes, or a graphical desktop.
+This is still a small standalone experimental kernel. The VFS and FAT32 layers are intentionally read-only, use DOS 8.3 names, and do not provide a current-working-directory or `chdir` model. The VFS exposes no write/create/delete API. It does **not** include writable FAT operations, long file names, partition parsing, AHCI, DMA, IRQ-driven ATA, NVMe, USB storage, networking, audio, SMP, user mode, processes, or a graphical desktop.
 
 It is not Linux ABI compatible and is separate from the Debian-based Linux95 distribution.
 
