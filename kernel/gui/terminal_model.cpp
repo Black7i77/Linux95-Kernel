@@ -44,10 +44,10 @@ void output_set_color(
 } // namespace
 
 TerminalModel::TerminalModel()
-    : lines_{},
-      line_count_(1),
+    : line_count_(1),
       cursor_column_(0)
 {
+    clear();
 }
 
 void TerminalModel::clear()
