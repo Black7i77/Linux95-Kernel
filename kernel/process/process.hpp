@@ -29,11 +29,29 @@ struct Process {
     uint32_t fault_vector;
 };
 
+struct ReapOperations {
+    void* context;
+    bool (*lookup_user_page)(void* context,
+                             uint64_t root_physical,
+                             uint64_t virtual_address,
+                             uint64_t& physical_address);
+    void (*release_physical_page)(void* context,
+                                  uint64_t physical_address);
+    void (*destroy_address_space)(void* context,
+                                  uint64_t root_physical);
+    uint64_t (*kernel_stack_physical)(void* context,
+                                      uint64_t kernel_stack_base);
+};
+
 void initialize();
 Process* allocate();
 Process* find(uint32_t pid);
 void release(Process& process);
 size_t capacity();
 Process* table();
+void mark_exited(Process& process, int64_t code);
+void reap_exited();
+void reap_one_for_test(Process& process);
+void reap_one_for_test(Process& process, const ReapOperations& operations);
 
 }

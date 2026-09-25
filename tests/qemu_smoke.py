@@ -74,11 +74,14 @@ proc = subprocess.Popen(
 
 deadline = time.monotonic() + 12.0
 saw_completion = False
+completion_seen_at = None
 early_exit = None
 completion_marker = (
-    "[PASS] desktop_online"
-    if WITHOUT_NETWORK or PROCESS_SELF_TEST
-    else "[PASS] icmp_echo_reply"
+    "[PASS] process reaped"
+    if PROCESS_SELF_TEST
+    else ("[PASS] desktop_online"
+          if WITHOUT_NETWORK
+          else "[PASS] icmp_echo_reply")
 )
 
 try:
@@ -91,8 +94,14 @@ try:
         if LOG.exists():
             content = LOG.read_text(errors="replace")
             if completion_marker in content:
-                saw_completion = True
-                break
+                if not PROCESS_SELF_TEST:
+                    saw_completion = True
+                    break
+                if completion_seen_at is None:
+                    completion_seen_at = time.monotonic()
+                elif time.monotonic() - completion_seen_at >= 0.25:
+                    saw_completion = True
+                    break
 
         time.sleep(0.05)
 finally:
@@ -183,6 +192,8 @@ if PROCESS_SELF_TEST:
     required.extend([
         "[PASS] entered ring3",
         "[PASS] int80 syscall path",
+        "[PASS] process exited",
+        "[PASS] process reaped",
     ])
 
 missing = [marker for marker in required if marker not in content]
@@ -199,6 +210,13 @@ if missing:
     if stderr.strip():
         print("--- qemu stderr ---")
         print(stderr.strip())
+    sys.exit(1)
+
+if PROCESS_SELF_TEST and content.count("[PASS] process exited") != 1:
+    print("qemu smoke test: FAIL")
+    print("process exit marker was not emitted exactly once")
+    print("--- debug log ---")
+    print(content or "(empty)")
     sys.exit(1)
 
 print("[PASS] Linux95 booted in QEMU")

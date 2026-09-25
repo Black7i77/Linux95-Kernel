@@ -2,6 +2,7 @@
 
 #include "arch/x86_64/control_regs.hpp"
 #include "arch/x86_64/tss.hpp"
+#include "arch/debug.hpp"
 #include "syscall/syscall.hpp"
 
 namespace linux95::scheduler {
@@ -10,7 +11,20 @@ namespace {
 
 process::HostContext g_host_context{};
 uint64_t g_host_cr3 = 0;
+uint64_t g_host_rflags = 0;
 int g_previous_slot = -1;
+
+uint64_t read_rflags()
+{
+    uint64_t value = 0;
+    asm volatile("pushfq; pop %0" : "=r"(value));
+    return value;
+}
+
+void write_rflags(uint64_t value)
+{
+    asm volatile("push %0; popfq" : : "r"(value) : "cc", "memory");
+}
 
 }
 
@@ -46,6 +60,7 @@ bool run_once()
     g_previous_slot = slot;
     selected.state = process::State::Running;
     g_host_cr3 = arch::x86_64::read_cr3();
+    g_host_rflags = read_rflags();
 
     if (process::process_save_host(&g_host_context) == 0) {
         arch::x86_64::write_cr3(selected.page_table_physical);
@@ -54,6 +69,13 @@ bool run_once()
             &selected,
             selected.kernel_stack_top);
         process::process_resume_user(&selected.context);
+    }
+
+    write_rflags(g_host_rflags);
+
+    if (selected.state == process::State::Exited) {
+        process::reap_exited();
+        debug::write("[PASS] process reaped\n");
     }
 
     return true;

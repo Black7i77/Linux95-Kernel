@@ -7,8 +7,9 @@ global process_restore_host
 global process_resume_user
 
 process_save_host:
-    mov [rdi + 0], rsp
-    lea rax, [rel .resume_host]
+    lea rax, [rsp + 8]
+    mov [rdi + 0], rax
+    mov rax, [rsp]
     mov [rdi + 8], rax
     mov [rdi + 16], rbx
     mov [rdi + 24], rbp
@@ -17,16 +18,6 @@ process_save_host:
     mov [rdi + 48], r14
     mov [rdi + 56], r15
     xor eax, eax
-    ret
-.resume_host:
-    mov rsp, [rdi + 0]
-    mov rbx, [rdi + 16]
-    mov rbp, [rdi + 24]
-    mov r12, [rdi + 32]
-    mov r13, [rdi + 40]
-    mov r14, [rdi + 48]
-    mov r15, [rdi + 56]
-    mov eax, 1
     ret
 
 process_restore_host:
@@ -37,6 +28,7 @@ process_restore_host:
     mov r13, [rdi + 40]
     mov r14, [rdi + 48]
     mov r15, [rdi + 56]
+    mov eax, 1
     jmp [rdi + 8]
 
 process_resume_user:

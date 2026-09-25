@@ -22,6 +22,7 @@ constexpr int64_t kFault = -14;
 constexpr int64_t kInvalidArgument = -22;
 constexpr int64_t kNotImplemented = -38;
 constexpr uint64_t kMaxWriteLength = 4096;
+uint8_t g_write_buffer[kMaxWriteLength];
 
 Result number_action(process::Process& process, Frame& frame)
 {
@@ -30,11 +31,24 @@ Result number_action(process::Process& process, Frame& frame)
         return {0, Action::YieldToHost};
     }
     if (number == Number::Exit) {
-        process.exit_code = static_cast<int64_t>(frame.rdi);
-        process.state = process::State::Exited;
+        process::mark_exited(process, static_cast<int64_t>(frame.rdi));
         return {0, Action::ExitToHost};
     }
     return {kNotImplemented, Action::ReturnToUser};
+}
+
+void emit_process_exit_marker(bool from_user)
+{
+    static bool emitted = false;
+    if (from_user && !emitted) {
+        emitted = true;
+        debug::write("[PASS] process exited\n");
+    }
+}
+
+void restore_host_gs_after_syscall()
+{
+    asm volatile("swapgs" ::: "memory");
 }
 
 Result safe_write(process::Process& process, Frame& frame)
@@ -45,7 +59,6 @@ Result safe_write(process::Process& process, Frame& frame)
     if (frame.rdx > kMaxWriteLength) {
         return {kInvalidArgument, Action::ReturnToUser};
     }
-    uint8_t buffer[kMaxWriteLength];
     if (!memory::validate_user_range(
             process.page_table_physical,
             frame.rsi,
@@ -55,13 +68,13 @@ Result safe_write(process::Process& process, Frame& frame)
     }
     if (!memory::copy_from_user(
             process.page_table_physical,
-            buffer,
+            g_write_buffer,
             frame.rsi,
             static_cast<size_t>(frame.rdx))) {
         return {kFault, Action::ReturnToUser};
     }
     for (uint64_t index = 0; index < frame.rdx; ++index) {
-        debug::put_char(static_cast<char>(buffer[index]));
+        debug::put_char(static_cast<char>(g_write_buffer[index]));
     }
     return {static_cast<int64_t>(frame.rdx), Action::ReturnToUser};
 }
@@ -193,6 +206,7 @@ extern "C" uint64_t int80_bridge(linux95::syscall::Frame* frame)
             process->context,
             linux95::scheduler::HostReason::Yield);
     }
+    linux95::syscall::emit_process_exit_marker((frame->cs & 3U) == 3U);
     linux95::scheduler::return_to_host(
         *process,
         process->context,
@@ -217,11 +231,14 @@ extern "C" uint64_t syscall_bridge(linux95::syscall::Frame* frame)
             linux95::process::ReturnKind::Sysret);
         if (result.action == linux95::syscall::Action::YieldToHost) {
             process.state = linux95::process::State::Ready;
+            linux95::syscall::restore_host_gs_after_syscall();
             linux95::scheduler::return_to_host(
                 process,
                 process.context,
                 linux95::scheduler::HostReason::Yield);
         }
+        linux95::syscall::emit_process_exit_marker((frame->cs & 3U) == 3U);
+        linux95::syscall::restore_host_gs_after_syscall();
         linux95::scheduler::return_to_host(
             process,
             process.context,
@@ -231,6 +248,7 @@ extern "C" uint64_t syscall_bridge(linux95::syscall::Frame* frame)
             frame->rcx,
             linux95::syscall::g_cpu_local_state.saved_user_rsp)) {
         process.state = linux95::process::State::Exited;
+        linux95::syscall::restore_host_gs_after_syscall();
         linux95::scheduler::return_to_host(
             process,
             process.context,
