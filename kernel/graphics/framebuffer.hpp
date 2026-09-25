@@ -33,6 +33,6 @@ struct Framebuffer {
 };
 
 FramebufferInitResult initialize_framebuffer(const BootInfo& boot_info);
-const Framebuffer* framebuffer();
+Framebuffer* framebuffer();
 
 } // namespace linux95::graphics

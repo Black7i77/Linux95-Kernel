@@ -67,8 +67,7 @@ FramebufferInitResult initialize_framebuffer(const BootInfo& boot_info)
     }
 
     constexpr uint64_t kFramebufferPageFlags =
-        memory::paging::kPageWritable |
-        memory::paging::kPageNoExecute;
+        memory::paging::kPageWritable;
 
     uint64_t mapped_pages = 0;
 
@@ -119,7 +118,7 @@ FramebufferInitResult initialize_framebuffer(const BootInfo& boot_info)
     return FramebufferInitResult::Ready;
 }
 
-const Framebuffer* framebuffer()
+Framebuffer* framebuffer()
 {
     if (!g_framebuffer_ready) {
         return nullptr;

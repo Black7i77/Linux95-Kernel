@@ -35,6 +35,7 @@ cmd = [
     "-machine", "pc",
     "-m", "128M",
     "-boot", "c",
+    "-vga", "std",
     "-drive", f"if=ide,index=0,media=disk,format=raw,file={IMAGE}",
     "-drive", f"if=ide,index=1,media=disk,format=raw,file={STORAGE_IMAGE}",
     "-display", "none",
@@ -54,7 +55,7 @@ proc = subprocess.Popen(
 )
 
 deadline = time.monotonic() + 12.0
-saw_shell = False
+saw_desktop = False
 early_exit = None
 
 try:
@@ -66,8 +67,8 @@ try:
 
         if LOG.exists():
             content = LOG.read_text(errors="replace")
-            if "[PASS] shell_ready" in content:
-                saw_shell = True
+            if "[PASS] desktop_online" in content:
+                saw_desktop = True
                 break
 
         time.sleep(0.05)
@@ -86,7 +87,7 @@ if proc.stderr is not None:
 
 content = LOG.read_text(errors="replace") if LOG.exists() else ""
 
-if early_exit is not None and not saw_shell:
+if early_exit is not None and not saw_desktop:
     print("qemu smoke test: FAIL")
     print(f"QEMU exited early with status {early_exit}")
     if stderr.strip():
@@ -132,7 +133,11 @@ required = [
     "[PASS] vfs_directory_open",
     "[PASS] vfs_readdir",
     "[PASS] vfs_self_test",
-    "[PASS] shell_ready",
+    "[PASS] framebuffer_mapped",
+    "[PASS] renderer_online",
+    "[PASS] terminal_app_ready",
+    "[PASS] system_info_app_ready",
+    "[PASS] desktop_online",
 ]
 
 missing = [marker for marker in required if marker not in content]
@@ -153,5 +158,5 @@ if missing:
 
 print("[PASS] Linux95 booted in QEMU")
 print("[PASS] x86_64 kernel entered kernel_main")
-print("[PASS] kernel initialization reached shell")
+print("[PASS] kernel initialization reached graphical desktop")
 print("QEMU smoke test: PASS")

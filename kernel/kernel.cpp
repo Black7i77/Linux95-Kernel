@@ -1,5 +1,6 @@
 #include "boot_info.hpp"
 #include "graphics/framebuffer.hpp"
+#include "gui/desktop.hpp"
 
 #include "arch/debug.hpp"
 #include "arch/io.hpp"
@@ -127,7 +128,8 @@ extern "C" [[noreturn]] void linux95_higher_half_entry(
                graphics::FramebufferInitResult::InvalidMetadata) {
         debug::write("[PANIC] framebuffer_invalid\n");
         panic::halt("Framebuffer metadata invalid");
-    } else {
+    } else if (framebuffer_result ==
+               graphics::FramebufferInitResult::MappingFailed) {
         debug::write("[PANIC] framebuffer_mapping\n");
         panic::halt("Framebuffer mapping failed");
     }
@@ -181,18 +183,37 @@ extern "C" [[noreturn]] void linux95_higher_half_entry(
 
     io::enable_interrupts();
 
-    vga::set_color(10, 0);
-    vga::write("Linux95 Kernel v1.0 Storage Foundation\n");
-    vga::set_color(7, 0);
-    vga::write("Architecture: x86_64 higher-half\n");
-    vga::write("Bootloader: Linux95 BIOS Loader\n");
-    vga::write("Memory: HHDM + 4 KiB page allocator/VM\n");
-    vga::write("Storage: ATA PIO + LBA28 (boot disk read-only)\n");
-    vga::set_color(10, 0);
-    vga::write("Status: ONLINE\n\n");
-    vga::set_color(7, 0);
-    vga::write("Type 'help' for commands.\n\n");
+    if (framebuffer_result ==
+        graphics::FramebufferInitResult::Unavailable) {
+        debug::write("[INFO] graphics_fallback_vga\n");
 
-    debug::write("[PASS] shell_ready\n");
-    shell::run();
+        vga::set_color(10, 0);
+        vga::write("Linux95 Kernel v1.0 Graphics Desktop Foundation\n");
+        vga::set_color(7, 0);
+        vga::write("Graphics: VGA text fallback\n");
+        vga::write("Architecture: x86_64 higher-half\n");
+        vga::write("Bootloader: Linux95 BIOS Loader\n");
+        vga::write("Storage: ATA PIO + LBA28 (boot disk read-only)\n");
+        vga::set_color(10, 0);
+        vga::write("Status: VGA FALLBACK ONLINE\n\n");
+        vga::set_color(7, 0);
+        vga::write("Type 'help' for commands.\n\n");
+
+        debug::write("[PASS] shell_ready\n");
+        shell::run_vga();
+    }
+
+    graphics::Framebuffer* const active_framebuffer =
+        graphics::framebuffer();
+
+    if (active_framebuffer == nullptr) {
+        debug::write("[PANIC] framebuffer_missing\n");
+        panic::halt("Framebuffer ready but accessor returned null");
+    }
+
+    debug::write("[PASS] renderer_online\n");
+
+    desktop::run(
+        *active_framebuffer,
+        mouse_online);
 }

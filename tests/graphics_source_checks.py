@@ -69,3 +69,27 @@ if "[PASS] mouse_initialized" not in kernel:
 
 if "[INFO] mouse_unavailable" not in kernel:
     raise SystemExit("FAIL: optional mouse fallback diagnostic missing")
+
+
+# Task 13 graphical desktop boot contract
+_task13_kernel = (ROOT / "kernel/kernel.cpp").read_text()
+_task13_framebuffer = (ROOT / "kernel/graphics/framebuffer.cpp").read_text()
+_task13_qemu = (ROOT / "tests/qemu_smoke.py").read_text()
+
+for _required in [
+    "[INFO] graphics_fallback_vga",
+    "shell::run_vga()",
+    "[PASS] renderer_online",
+    "desktop::run(",
+]:
+    if _required not in _task13_kernel:
+        raise SystemExit("FAIL: graphical boot marker missing: " + _required)
+
+if "memory::paging::kPageNoExecute" in _task13_framebuffer:
+    raise SystemExit("FAIL: framebuffer uses NX while EFER.NXE is disabled")
+
+if "[PASS] desktop_online" not in _task13_qemu:
+    raise SystemExit("FAIL: QEMU smoke does not require desktop_online")
+
+if "\"-vga\", \"std\"" not in _task13_qemu:
+    raise SystemExit("FAIL: QEMU smoke does not use standard VGA")

@@ -47,10 +47,31 @@ Verified architecture in this milestone:
 - IDT and exception handling
 - legacy PIC + 100 Hz PIT
 - interrupt-driven PS/2 keyboard
-- VGA text terminal and `linux95>` shell
+- VBE 1280x720x32 graphical desktop with VGA text-shell fallback
 - QEMU debug-port checkpoints and automated smoke testing
 
 The Linux95 boot image is attached as the primary IDE master and is treated as read-only by the kernel. A disposable QEMU test image is attached as the primary IDE slave and is the only writable disk in this milestone.
+
+
+## Graphics desktop
+
+Linux95 v1.0 boots into a graphical desktop when the BIOS/VBE framebuffer handoff is available.
+
+Current desktop features include:
+
+- 1280x720x32 VBE framebuffer
+- freestanding software renderer
+- PS/2 mouse support
+- top panel and Applications menu
+- Terminal and System Info applications
+- focus, drag, resize, minimize, close, and restore
+- uptime/status display
+- VGA text-shell fallback when framebuffer graphics are unavailable
+- QEMU graphical smoke testing with standard VGA
+
+The graphical boot path reports `[PASS] framebuffer_mapped`, `[PASS] renderer_online`, and `[PASS] desktop_online` through the debug port.
+
+Linux95 remains a legacy BIOS/VBE project for this milestone.
 
 ## Shell commands
 

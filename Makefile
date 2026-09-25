@@ -306,7 +306,7 @@ $(BUILD)/linux95-kernel.img: \
 >dd if=$(BUILD)/stage2.bin of=$@ bs=$(SECTOR) seek=1 conv=notrunc status=none
 >dd if=$(BUILD)/kernel.bin of=$@ bs=$(SECTOR) seek=$(KERNEL_LBA) conv=notrunc status=none
 >@echo
->@echo "Linux95 Kernel v1.0 VFS Foundation image built:"
+>@echo "Linux95 Kernel v1.0 Graphics Desktop Foundation image built:"
 >@ls -lh $@
 
 $(STORAGE_TEST_IMAGE): | $(BUILD)
@@ -347,6 +347,7 @@ run: all prepare-storage-test-image
 	-machine pc \
 	-m 128M \
 	-boot c \
+    -vga std \
 	-drive if=ide,index=0,media=disk,format=raw,file=$(BUILD)/linux95-kernel.img \
 	-drive if=ide,index=1,media=disk,format=raw,file=$(STORAGE_TEST_IMAGE)
 
@@ -355,6 +356,7 @@ run-debug: all prepare-storage-test-image
 	-machine pc \
 	-m 128M \
 	-boot c \
+    -vga std \
 	-drive if=ide,index=0,media=disk,format=raw,file=$(BUILD)/linux95-kernel.img \
 	-drive if=ide,index=1,media=disk,format=raw,file=$(STORAGE_TEST_IMAGE) \
 	-no-reboot \
