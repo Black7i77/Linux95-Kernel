@@ -61,6 +61,22 @@ void* allocate(size_t bytes)
     return reinterpret_cast<void*>(result);
 }
 
+Checkpoint checkpoint()
+{
+    return {g_current};
+}
+
+bool rewind(Checkpoint checkpoint_value)
+{
+    if (g_current == 0 || checkpoint_value.current < g_start ||
+        checkpoint_value.current > g_current ||
+        (checkpoint_value.current & 0xFULL) != 0) {
+        return false;
+    }
+    g_current = checkpoint_value.current;
+    return true;
+}
+
 uint64_t used_bytes()
 {
     return g_current >= g_start ? g_current - g_start : 0;

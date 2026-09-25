@@ -11,11 +11,22 @@ def run(command):
 
 
 def main():
-    if len(sys.argv) != 2:
-        print("usage: prepare_fat32_image.py <output-image>")
+    process_fault = "--process-fault" in sys.argv[2:]
+    if len(sys.argv) not in (2, 3) or any(
+            argument != "--process-fault" for argument in sys.argv[2:]):
+        print("usage: prepare_fat32_image.py <output-image> [--process-fault]")
         return 2
 
     image = Path(sys.argv[1]).resolve()
+    user_init = Path("build/user/init.elf").resolve()
+    user_worker = Path("build/user/worker.elf").resolve()
+    user_fault = Path("build/user/fault.elf").resolve()
+    if not user_worker.is_file() or (
+            process_fault and not user_fault.is_file()) or (
+            not process_fault and not user_init.is_file()):
+        print("missing build/user/init.elf or build/user/worker.elf")
+        return 1
+    init_image = user_fault if process_fault else user_init
     image.parent.mkdir(parents=True, exist_ok=True)
     image.unlink(missing_ok=True)
 
@@ -52,6 +63,12 @@ def main():
         ])
 
         run([
+            "mmd",
+            "-i", str(image),
+            "::USER",
+        ])
+
+        run([
             "mcopy",
             "-o",
             "-i", str(image),
@@ -74,6 +91,37 @@ def main():
             str(fixture / "KERNEL.TXT"),
             "::DOCS/KERNEL.TXT",
         ])
+
+        run([
+            "mcopy",
+            "-o",
+            "-i", str(image),
+            str(init_image),
+            "::USER/INIT.ELF",
+        ])
+
+        run([
+            "mcopy",
+            "-o",
+            "-i", str(image),
+            str(user_worker),
+            "::USER/WORKER.ELF",
+        ])
+
+        if process_fault:
+            run([
+                "mcopy",
+                "-o",
+                "-i", str(image),
+                str(user_fault),
+                "::USER/FAULT.ELF",
+            ])
+
+        paths = ["::USER/INIT.ELF", "::USER/WORKER.ELF"]
+        if process_fault:
+            paths.append("::USER/FAULT.ELF")
+        for path in paths:
+            run(["mdir", "-i", str(image), path])
 
     print(f"FAT32 fixture created: {image}")
     return 0

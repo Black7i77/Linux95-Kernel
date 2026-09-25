@@ -1,5 +1,7 @@
 #include "memory/memory.hpp"
 
+#include "memory/address.hpp"
+
 #include <stdint.h>
 
 namespace linux95::memory {
@@ -194,6 +196,24 @@ uintptr_t heap_start()
 uintptr_t heap_end()
 {
     return g_heap_end;
+}
+
+bool kernel_virtual_to_physical(
+    const void* address,
+    uint64_t& physical)
+{
+    const uint64_t virtual_address =
+        reinterpret_cast<uint64_t>(address);
+    const uint64_t direct_map_end =
+        kKernelRegionBase + kHugePageSize;
+
+    if (virtual_address < kKernelVirtualBase ||
+        virtual_address >= direct_map_end) {
+        return false;
+    }
+
+    physical = virtual_address - kKernelRegionBase;
+    return true;
 }
 
 } // namespace linux95::memory

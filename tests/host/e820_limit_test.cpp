@@ -20,6 +20,7 @@ int main()
         3,
         reinterpret_cast<uint64_t>(entries),
         0x80,
+        linux95::FramebufferInfo{},
     };
 
     assert(

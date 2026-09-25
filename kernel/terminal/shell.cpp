@@ -8,18 +8,19 @@
 #include "memory/heap.hpp"
 #include "memory/memory.hpp"
 #include "memory/physical.hpp"
+#include "net/network.hpp"
 #include "filesystem/filesystem.hpp"
 #include "filesystem/vfs.hpp"
 #include "storage/disk.hpp"
-#include "terminal/vga.hpp"
+#include "terminal/output.hpp"
+#include "terminal/shell_session.hpp"
+#include "terminal/vga_output.hpp"
 
 #include <stddef.h>
 #include <stdint.h>
 
 namespace linux95::shell {
 namespace {
-
-constexpr size_t kCommandCapacity = 64;
 
 bool equals(const char* a, const char* b)
 {
@@ -66,187 +67,184 @@ ParsedCommand parse_command(char* input)
     };
 }
 
-void prompt()
+void print_version(terminal::Output& output)
 {
-    vga::set_color(10, 0);
-    vga::write("linux95");
-    vga::set_color(7, 0);
-    vga::write("> ");
+    terminal::write(output, "Linux95 Kernel v1.0 Storage Foundation\n");
+    terminal::write(output, "Architecture: x86_64 higher-half\n");
+    terminal::write(output, "Kernel: freestanding C++17\n");
 }
 
-void print_version()
+void print_help(terminal::Output& output)
 {
-    vga::write("Linux95 Kernel v1.0 Storage Foundation\n");
-    vga::write("Architecture: x86_64 higher-half\n");
-    vga::write("Kernel: freestanding C++17\n");
+    terminal::write(output, "Commands:\n");
+    terminal::write(output, "  help     Show this command list\n");
+    terminal::write(output, "  clear    Clear the screen\n");
+    terminal::write(output, "  version  Show kernel version\n");
+    terminal::write(output, "  mem      Show memory statistics\n");
+    terminal::write(output, "  diskinfo Show ATA disk information\n");
+    terminal::write(output, "  fsinfo   Show FAT32 filesystem information\n");
+    terminal::write(output, "  ls [path] List FAT32 directory\n");
+    terminal::write(output, "  cat <path> Read FAT32 file\n");
+    terminal::write(output, "  uptime   Show uptime in seconds\n");
+    terminal::write(output, "  ip       Show network configuration\n");
+    terminal::write(output, "  ping <IPv4 address> Send ICMP Echo Request\n");
+    terminal::write(output, "  reboot   Reboot the machine\n");
 }
 
-void print_help()
+void print_memory(terminal::Output& output)
 {
-    vga::write("Commands:\n");
-    vga::write("  help     Show this command list\n");
-    vga::write("  clear    Clear the screen\n");
-    vga::write("  version  Show kernel version\n");
-    vga::write("  mem      Show memory statistics\n");
-    vga::write("  diskinfo Show ATA disk information\n");
-    vga::write("  fsinfo   Show FAT32 filesystem information\n");
-    vga::write("  ls [path] List FAT32 directory\n");
-    vga::write("  cat <path> Read FAT32 file\n");
-    vga::write("  uptime   Show uptime in seconds\n");
-    vga::write("  reboot   Reboot the machine\n");
-}
+    terminal::write(output, "Total RAM: ");
+    terminal::write_uint(output, memory::total_bytes() / (1024u * 1024u));
+    terminal::write(output, " MiB\n");
 
-void print_memory()
-{
-    vga::write("Total RAM: ");
-    vga::write_uint(memory::total_bytes() / (1024u * 1024u));
-    vga::write(" MiB\n");
+    terminal::write(output, "Usable RAM: ");
+    terminal::write_uint(output, memory::usable_bytes() / (1024u * 1024u));
+    terminal::write(output, " MiB\n");
 
-    vga::write("Usable RAM: ");
-    vga::write_uint(memory::usable_bytes() / (1024u * 1024u));
-    vga::write(" MiB\n");
+    terminal::write(output, "Usable regions: ");
+    terminal::write_uint(output, memory::usable_regions());
+    output.put_char(output.context, '\n');
 
-    vga::write("Usable regions: ");
-    vga::write_uint(memory::usable_regions());
-    vga::put_char('\n');
+    terminal::write(output, "Physical pages: total=");
+    terminal::write_uint(output, memory::physical::total_pages());
+    terminal::write(output, " used=");
+    terminal::write_uint(output, memory::physical::used_pages());
+    terminal::write(output, " free=");
+    terminal::write_uint(output, memory::physical::free_pages());
+    output.put_char(output.context, '\n');
 
-    vga::write("Physical pages: total=");
-    vga::write_uint(memory::physical::total_pages());
-    vga::write(" used=");
-    vga::write_uint(memory::physical::used_pages());
-    vga::write(" free=");
-    vga::write_uint(memory::physical::free_pages());
-    vga::put_char('\n');
+    terminal::write(output, "Page size: ");
+    terminal::write_uint(output, memory::kPageSize);
+    terminal::write(output, " bytes\n");
 
-    vga::write("Page size: ");
-    vga::write_uint(memory::kPageSize);
-    vga::write(" bytes\n");
+    terminal::write(output, "HHDM base: ");
+    terminal::write_hex(output, memory::kHhdmBase);
+    output.put_char(output.context, '\n');
 
-    vga::write("HHDM base: ");
-    vga::write_hex(memory::kHhdmBase);
-    vga::put_char('\n');
+    terminal::write(output, "CR3: ");
+    terminal::write_hex(output, arch::x86_64::read_cr3());
+    output.put_char(output.context, '\n');
 
-    vga::write("CR3: ");
-    vga::write_hex(arch::x86_64::read_cr3());
-    vga::put_char('\n');
-
-    vga::write("Heap used: ");
-    vga::write_uint(heap::used_bytes() / 1024u);
-    vga::write(" KiB / ");
-    vga::write_uint(heap::capacity_bytes() / 1024u);
-    vga::write(" KiB\n");
+    terminal::write(output, "Heap used: ");
+    terminal::write_uint(output, heap::used_bytes() / 1024u);
+    terminal::write(output, " KiB / ");
+    terminal::write_uint(output, heap::capacity_bytes() / 1024u);
+    terminal::write(output, " KiB\n");
 }
 
 
-void print_disk(const char* label, storage::DiskId id, bool writable)
+void print_disk(terminal::Output& output, const char* label, storage::DiskId id, bool writable)
 {
     const storage::ata::DeviceInfo& device = storage::info(id);
 
-    vga::write(label);
-    vga::write(":\n");
-    vga::write("  Present: ");
-    vga::write(device.present ? "yes\n" : "no\n");
-    vga::write("  Interface: ATA PIO\n");
-    vga::write("  Mode: LBA28\n");
-    vga::write("  Model: ");
-    vga::write(device.present && device.model[0] != '\0' ? device.model : "(none)");
-    vga::put_char('\n');
-    vga::write("  Sectors: ");
-    vga::write_uint(device.lba28_sector_count);
-    vga::put_char('\n');
-    vga::write("  Writable: ");
-    vga::write(writable ? "yes\n" : "no\n");
+    terminal::write(output, label);
+    terminal::write(output, ":\n");
+    terminal::write(output, "  Present: ");
+    terminal::write(output, device.present ? "yes\n" : "no\n");
+    terminal::write(output, "  Interface: ATA PIO\n");
+    terminal::write(output, "  Mode: LBA28\n");
+    terminal::write(output, "  Model: ");
+    terminal::write(output, device.present && device.model[0] != '\0' ? device.model : "(none)");
+    output.put_char(output.context, '\n');
+    terminal::write(output, "  Sectors: ");
+    terminal::write_uint(output, device.lba28_sector_count);
+    output.put_char(output.context, '\n');
+    terminal::write(output, "  Writable: ");
+    terminal::write(output, writable ? "yes\n" : "no\n");
 }
 
-void print_diskinfo()
+void print_diskinfo(terminal::Output& output)
 {
-    print_disk("Boot disk", storage::DiskId::Boot, false);
-    vga::put_char('\n');
-    print_disk("Test disk", storage::DiskId::Test, true);
+    print_disk(output, "Boot disk", storage::DiskId::Boot, false);
+    output.put_char(output.context, '\n');
+    print_disk(output, "Test disk", storage::DiskId::Test, true);
 }
 
-void print_fsinfo()
+void print_fsinfo(terminal::Output& output)
 {
     const filesystem::VolumeInfo& info =
         filesystem::volume_info();
 
-    vga::write("FAT32 filesystem:\n");
+    terminal::write(output, "FAT32 filesystem:\n");
 
-    vga::write("  Mounted: ");
-    vga::write(info.mounted ? "yes\n" : "no\n");
+    terminal::write(output, "  Mounted: ");
+    terminal::write(output, info.mounted ? "yes\n" : "no\n");
 
-    vga::write("  Device: ATA test/slave disk\n");
+    terminal::write(output, "  Device: ATA test/slave disk\n");
 
-    vga::write("  Bytes/sector: ");
-    vga::write_uint(info.bytes_per_sector);
-    vga::put_char('\n');
+    terminal::write(output, "  Bytes/sector: ");
+    terminal::write_uint(output, info.bytes_per_sector);
+    output.put_char(output.context, '\n');
 
-    vga::write("  Sectors/cluster: ");
-    vga::write_uint(info.sectors_per_cluster);
-    vga::put_char('\n');
+    terminal::write(output, "  Sectors/cluster: ");
+    terminal::write_uint(output, info.sectors_per_cluster);
+    output.put_char(output.context, '\n');
 
-    vga::write("  FAT count: ");
-    vga::write_uint(info.fat_count);
-    vga::put_char('\n');
+    terminal::write(output, "  FAT count: ");
+    terminal::write_uint(output, info.fat_count);
+    output.put_char(output.context, '\n');
 
-    vga::write("  Sectors/FAT: ");
-    vga::write_uint(info.sectors_per_fat);
-    vga::put_char('\n');
+    terminal::write(output, "  Sectors/FAT: ");
+    terminal::write_uint(output, info.sectors_per_fat);
+    output.put_char(output.context, '\n');
 
-    vga::write("  Total sectors: ");
-    vga::write_uint(info.total_sectors);
-    vga::put_char('\n');
+    terminal::write(output, "  Total sectors: ");
+    terminal::write_uint(output, info.total_sectors);
+    output.put_char(output.context, '\n');
 
-    vga::write("  Root cluster: ");
-    vga::write_uint(info.root_cluster);
-    vga::put_char('\n');
+    terminal::write(output, "  Root cluster: ");
+    terminal::write_uint(output, info.root_cluster);
+    output.put_char(output.context, '\n');
 
-    vga::write("  Mode: read-only\n");
+    terminal::write(output, "  Mode: read-only\n");
 }
 
 void print_ls_error(
+    terminal::Output& output,
     filesystem::Status status)
 {
-    vga::write("ls: ");
+    terminal::write(output, "ls: ");
 
     if (status == filesystem::Status::NotFound) {
-        vga::write("not found");
+        terminal::write(output, "not found");
     } else if (
         status ==
         filesystem::Status::NotDirectory) {
-        vga::write("not a directory");
+        terminal::write(output, "not a directory");
     } else if (
         status ==
         filesystem::Status::NotMounted) {
-        vga::write("filesystem not mounted");
+        terminal::write(output, "filesystem not mounted");
     } else if (
         status ==
         filesystem::Status::Corrupt) {
-        vga::write("filesystem corrupt");
+        terminal::write(output, "filesystem corrupt");
     } else if (
         status ==
         filesystem::Status::IoError) {
-        vga::write("I/O error");
+        terminal::write(output, "I/O error");
     } else if (
         status ==
         filesystem::Status::Unsupported) {
-        vga::write("unsupported path");
+        terminal::write(output, "unsupported path");
     } else if (
         status ==
         filesystem::Status::TooManyOpenDirectories) {
-        vga::write("too many open directories");
+        terminal::write(output, "too many open directories");
     } else if (
         status ==
         filesystem::Status::InvalidHandle) {
-        vga::write("invalid directory handle");
+        terminal::write(output, "invalid directory handle");
     } else {
-        vga::write("unable to list directory");
+        terminal::write(output, "unable to list directory");
     }
 
-    vga::put_char('\n');
+    output.put_char(output.context, '\n');
 }
 
-void print_ls(const char* path)
+void print_ls(
+    terminal::Output& output,
+    const char* path)
 {
     const char* const target =
         path != nullptr ? path : "/";
@@ -260,7 +258,7 @@ void print_ls(const char* path)
             status);
 
     if (handle < 0) {
-        print_ls_error(status);
+        print_ls_error(output, status);
         return;
     }
 
@@ -276,7 +274,7 @@ void print_ls(const char* path)
 
         if (status != filesystem::Status::Ok) {
             filesystem::vfs::closedir(handle);
-            print_ls_error(status);
+            print_ls_error(output, status);
             return;
         }
 
@@ -284,75 +282,78 @@ void print_ls(const char* path)
             break;
         }
 
-        vga::write(entry.name);
+        terminal::write(output, entry.name);
 
         if (entry.is_directory) {
-            vga::put_char('/');
+            output.put_char(output.context, '/');
         }
 
-        vga::put_char('\n');
+        output.put_char(output.context, '\n');
     }
 
     status =
         filesystem::vfs::closedir(handle);
 
     if (status != filesystem::Status::Ok) {
-        print_ls_error(status);
+        print_ls_error(output, status);
     }
 }
 
 void print_cat_error(
+    terminal::Output& output,
     filesystem::Status status)
 {
-    vga::write("cat: ");
+    terminal::write(output, "cat: ");
 
     if (status == filesystem::Status::NotFound) {
-        vga::write("not found");
+        terminal::write(output, "not found");
     } else if (
         status ==
         filesystem::Status::IsDirectory) {
-        vga::write("is a directory");
+        terminal::write(output, "is a directory");
     } else if (
         status ==
         filesystem::Status::NotDirectory) {
-        vga::write(
+        terminal::write(output,
             "path component is not a directory");
     } else if (
         status ==
         filesystem::Status::NotMounted) {
-        vga::write("filesystem not mounted");
+        terminal::write(output, "filesystem not mounted");
     } else if (
         status ==
         filesystem::Status::Corrupt) {
-        vga::write("filesystem corrupt");
+        terminal::write(output, "filesystem corrupt");
     } else if (
         status ==
         filesystem::Status::IoError) {
-        vga::write("I/O error");
+        terminal::write(output, "I/O error");
     } else if (
         status ==
         filesystem::Status::Unsupported) {
-        vga::write("unsupported path");
+        terminal::write(output, "unsupported path");
     } else if (
         status ==
         filesystem::Status::TooManyOpenFiles) {
-        vga::write("too many open files");
+        terminal::write(output, "too many open files");
     } else if (
         status ==
         filesystem::Status::InvalidDescriptor) {
-        vga::write("invalid file descriptor");
+        terminal::write(output, "invalid file descriptor");
     } else {
-        vga::write("unable to read file");
+        terminal::write(output, "unable to read file");
     }
 
-    vga::put_char('\n');
+    output.put_char(output.context, '\n');
 }
 
-void print_cat(const char* path)
+void print_cat(
+    terminal::Output& output,
+    const char* path)
 {
     if (path == nullptr ||
         path[0] == '\0') {
-        vga::write("Usage: cat <path>\n");
+        terminal::write(output, "Usage: cat <path>\n");
         return;
     }
 
@@ -365,7 +366,7 @@ void print_cat(const char* path)
             status);
 
     if (fd < 0) {
-        print_cat_error(status);
+        print_cat_error(output, status);
         return;
     }
 
@@ -383,14 +384,14 @@ void print_cat(const char* path)
 
         if (status != filesystem::Status::Ok) {
             filesystem::vfs::close(fd);
-            print_cat_error(status);
+            print_cat_error(output, status);
             return;
         }
 
         for (size_t i = 0;
              i < got;
              ++i) {
-            vga::put_char(
+            output.put_char(output.context,
                 static_cast<char>(
                     buffer[i]));
         }
@@ -404,27 +405,31 @@ void print_cat(const char* path)
         filesystem::vfs::close(fd);
 
     if (status != filesystem::Status::Ok) {
-        print_cat_error(status);
+        print_cat_error(output, status);
     }
 }
 
-void reboot()
+void reboot(terminal::Output& output)
 {
-    vga::write("Rebooting...\n");
+    terminal::write(output, "Rebooting...\n");
     constexpr uint32_t kWaitLimit = 1000000u;
     for (uint32_t i = 0; i < kWaitLimit; ++i) {
         if ((io::inb(0x64) & 0x02u) == 0) {
             io::outb(0x64, 0xFE);
             for (uint32_t spin = 0; spin < kWaitLimit; ++spin) io::pause();
-            vga::write("Reboot request did not reset the system.\n");
+            terminal::write(output, "Reboot request did not reset the system.\n");
             return;
         }
         io::pause();
     }
-    vga::write("Keyboard controller stayed busy; reboot cancelled.\n");
+    terminal::write(output, "Keyboard controller stayed busy; reboot cancelled.\n");
 }
 
-void execute(char* command)
+} // namespace
+
+void execute_command(
+    terminal::Output& output,
+    char* command)
 {
     ParsedCommand parsed =
         parse_command(command);
@@ -433,70 +438,111 @@ void execute(char* command)
         return;
     }
 
-    if (equals(parsed.name, "help")) { print_help(); return; }
-    if (equals(parsed.name, "clear")) { vga::clear(); return; }
-    if (equals(parsed.name, "version")) { print_version(); return; }
-    if (equals(parsed.name, "mem")) { print_memory(); return; }
-    if (equals(parsed.name, "diskinfo")) { print_diskinfo(); return; }
-    if (equals(parsed.name, "fsinfo")) { print_fsinfo(); return; }
+    if (equals(parsed.name, "help")) { print_help(output); return; }
+    if (equals(parsed.name, "clear")) {
+        output.clear(output.context);
+        return;
+    }
+    if (equals(parsed.name, "version")) { print_version(output); return; }
+    if (equals(parsed.name, "mem")) { print_memory(output); return; }
+    if (equals(parsed.name, "diskinfo")) { print_diskinfo(output); return; }
+    if (equals(parsed.name, "fsinfo")) { print_fsinfo(output); return; }
     if (equals(parsed.name, "ls")) {
-        print_ls(parsed.argument);
+        print_ls(output, parsed.argument);
         return;
     }
 
     if (equals(parsed.name, "cat")) {
-        print_cat(parsed.argument);
+        print_cat(output, parsed.argument);
         return;
     }
 
     if (equals(parsed.name, "uptime")) {
-        vga::write("Uptime: ");
-        vga::write_uint(pit::uptime_seconds());
-        vga::write(" seconds\n");
+        terminal::write(output, "Uptime: ");
+        terminal::write_uint(output, pit::uptime_seconds());
+        terminal::write(output, " seconds\n");
         return;
     }
-    if (equals(parsed.name, "reboot")) { reboot(); return; }
+    if (equals(parsed.name, "reboot")) { reboot(output); return; }
 
-    vga::write("Unknown command: ");
-    vga::write(parsed.name);
-    vga::write("\nType 'help' for commands.\n");
+    terminal::write(output, "Unknown command: ");
+    terminal::write(output, parsed.name);
+    terminal::write(output, "\nType 'help' for commands.\n");
+}
+
+
+namespace {
+
+network::Status network_status(void*)
+{
+    return network::status();
+}
+
+bool network_start_ping(void*, net::Ipv4Address destination)
+{
+    return network::start_ping(destination);
+}
+
+net::icmp::PingResult network_ping_result(void*)
+{
+    return network::ping_result();
+}
+
+void network_clear_ping_result(void*)
+{
+    network::clear_ping_result();
+}
+
+void execute_session_command(
+    void*,
+    terminal::Output& output,
+    char* command)
+{
+    execute_command(
+        output,
+        command);
 }
 
 } // namespace
 
-[[noreturn]] void run()
+[[noreturn]] void run_vga()
 {
-    char command[kCommandCapacity];
-    size_t length = 0;
-    prompt();
+    terminal::Output output =
+        terminal::make_vga_output();
+
+    terminal::NetworkCallbacks network_callbacks{
+        nullptr,
+        network_status,
+        network_start_ping,
+        network_ping_result,
+        network_clear_ping_result,
+    };
+
+    terminal::ShellSession session(
+        output,
+        nullptr,
+        execute_session_command,
+        &network_callbacks);
+
+    session.begin();
 
     for (;;) {
+        network::poll();
+        (void)session.poll();
+
         if (!keyboard::has_char()) {
             io::halt();
             continue;
         }
 
-        const char c = keyboard::read_char();
-        if (c == '\n') {
-            vga::put_char('\n');
-            command[length] = '\0';
-            execute(command);
-            length = 0;
-            prompt();
-            continue;
-        }
-        if (c == '\b') {
-            if (length > 0) {
-                --length;
-                vga::put_char('\b');
-            }
-            continue;
-        }
-        if (c >= 32 && c <= 126 && length + 1 < kCommandCapacity) {
-            command[length++] = c;
-            vga::put_char(c);
-        }
+        session.on_char(
+            keyboard::read_char());
     }
+}
+
+[[noreturn]] void run()
+{
+    run_vga();
 }
 
 } // namespace linux95::shell

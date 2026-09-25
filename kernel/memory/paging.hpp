@@ -2,6 +2,18 @@
 
 #include <stdint.h>
 
+namespace linux95::memory {
+
+struct PageInfo {
+    bool present;
+    bool user;
+    bool writable;
+    bool executable;
+    uint64_t physical;
+};
+
+}
+
 namespace linux95::memory::paging {
 
 constexpr uint64_t kInvalidAddress = UINT64_MAX;
@@ -47,5 +59,8 @@ bool map_page(uint64_t virtual_address,
 bool unmap_page(uint64_t virtual_address);
 uint64_t translate(uint64_t virtual_address);
 bool is_mapped(uint64_t virtual_address);
+bool query_page(uint64_t root_physical,
+                uint64_t virtual_address,
+                PageInfo& out);
 
 } // namespace linux95::memory::paging

@@ -1,6 +1,7 @@
 #include "memory/paging.hpp"
 
 #include "arch/x86_64/control_regs.hpp"
+#include "arch/x86_64/msr.hpp"
 #include "memory/address.hpp"
 #include "memory/physical.hpp"
 
@@ -80,7 +81,9 @@ bool map_page(uint64_t virtual_address,
               uint64_t flags)
 {
     if (!is_page_aligned(virtual_address) ||
-        !is_page_aligned(physical_address)) {
+        !is_page_aligned(physical_address) ||
+        ((flags & kPageNoExecute) != 0 &&
+         !arch::x86_64::nxe_enabled())) {
         return false;
     }
 
@@ -164,6 +167,71 @@ uint64_t translate(uint64_t virtual_address)
 bool is_mapped(uint64_t virtual_address)
 {
     return translate(virtual_address) != kInvalidAddress;
+}
+
+bool query_page(uint64_t root_physical,
+                uint64_t virtual_address,
+                PageInfo& out)
+{
+    out = {false, false, false, false, 0};
+    if (!is_page_aligned(root_physical)) {
+        return false;
+    }
+
+    const uint64_t* pml4 = table_from_physical(root_physical);
+    const uint64_t pml4e = pml4[pml4_index(virtual_address)];
+    if ((pml4e & kPagePresent) == 0) {
+        return true;
+    }
+
+    bool user = (pml4e & kPageUser) != 0;
+    bool writable = (pml4e & kPageWritable) != 0;
+    bool executable = (pml4e & kPageNoExecute) == 0;
+    const uint64_t pdpt_physical = pml4e & kAddressMask;
+    const uint64_t* pdpt = table_from_physical(pdpt_physical);
+    const uint64_t pdpte = pdpt[pdpt_index(virtual_address)];
+    if ((pdpte & kPagePresent) == 0) {
+        return true;
+    }
+
+    user = user && (pdpte & kPageUser) != 0;
+    writable = writable && (pdpte & kPageWritable) != 0;
+    executable = executable && (pdpte & kPageNoExecute) == 0;
+    if ((pdpte & kPageHuge) != 0) {
+        out = {true, user, writable, executable,
+               (pdpte & kOneGiBAddressMask) |
+                   (virtual_address & 0x3FFFFFFFULL)};
+        return true;
+    }
+
+    const uint64_t* pd = table_from_physical(pdpte & kAddressMask);
+    const uint64_t pde = pd[pd_index(virtual_address)];
+    if ((pde & kPagePresent) == 0) {
+        return true;
+    }
+
+    user = user && (pde & kPageUser) != 0;
+    writable = writable && (pde & kPageWritable) != 0;
+    executable = executable && (pde & kPageNoExecute) == 0;
+    if ((pde & kPageHuge) != 0) {
+        out = {true, user, writable, executable,
+               (pde & kTwoMiBAddressMask) |
+                   (virtual_address & 0x1FFFFFULL)};
+        return true;
+    }
+
+    const uint64_t* pt = table_from_physical(pde & kAddressMask);
+    const uint64_t pte = pt[pt_index(virtual_address)];
+    if ((pte & kPagePresent) == 0) {
+        return true;
+    }
+
+    user = user && (pte & kPageUser) != 0;
+    writable = writable && (pte & kPageWritable) != 0;
+    executable = executable && (pte & kPageNoExecute) == 0;
+    out = {true, user, writable, executable,
+           (pte & kAddressMask) | (virtual_address & 0xFFFULL)};
+    return true;
 }
 
 bool unmap_page(uint64_t virtual_address)

@@ -7,6 +7,24 @@ import subprocess
 ROOT = Path(__file__).resolve().parents[1]
 BUILD = ROOT / "build"
 
+makefile_text = (ROOT / "Makefile").read_text()
+kernel_sector_match = re.search(
+    r"^KERNEL_SECTORS\s*:=\s*(\d+)\s*$",
+    makefile_text,
+    re.MULTILINE,
+)
+
+if kernel_sector_match is None:
+    raise SystemExit("FAIL: unable to read KERNEL_SECTORS from Makefile")
+
+kernel_sectors = int(kernel_sector_match.group(1))
+
+if kernel_sectors % 64 != 0:
+    raise SystemExit(
+        f"FAIL: KERNEL_SECTORS={kernel_sectors} is not divisible by 64"
+    )
+
+
 makefile = (ROOT / "Makefile").read_text()
 stage2_source = (ROOT / "boot/stage2.asm").read_text()
 
@@ -89,5 +107,48 @@ if symbol_map["__bootstrap_pt_pool_start"] & 0xFFF:
     raise SystemExit("FAIL: bootstrap page-table pool is not 4 KiB aligned")
 if symbol_map["__bootstrap_pt_pool_end"] <= symbol_map["__bootstrap_pt_pool_start"]:
     raise SystemExit("FAIL: bootstrap page-table pool is empty")
+
+user_image_base = 0x0000400000000000
+user_image_limit = 0x0000400100000000
+
+def check_user_elf(name):
+    path = BUILD / "user" / name
+    if not path.is_file():
+        raise SystemExit(f"FAIL: missing user ELF: {path}")
+
+    header = subprocess.run(
+        ["readelf", "-h", str(path)],
+        check=True,
+        text=True,
+        capture_output=True,
+    ).stdout
+    required_header = (
+        "Class:                             ELF64",
+        "Data:                              2's complement, little endian",
+        "Machine:                           Advanced Micro Devices X86-64",
+        "Type:                              EXEC (Executable file)",
+    )
+    for required in required_header:
+        if required not in header:
+            raise SystemExit(f"FAIL: {name} missing ELF property: {required}")
+
+    entry_match = re.search(r"Entry point address:\s+0x([0-9a-fA-F]+)", header)
+    if entry_match is None:
+        raise SystemExit(f"FAIL: {name} has no entry point")
+    entry = int(entry_match.group(1), 16)
+    if not user_image_base <= entry < user_image_limit:
+        raise SystemExit(f"FAIL: {name} entry outside user image window")
+
+    program_headers = subprocess.run(
+        ["readelf", "-l", str(path)],
+        check=True,
+        text=True,
+        capture_output=True,
+    ).stdout
+    if "INTERP" in program_headers:
+        raise SystemExit(f"FAIL: {name} contains an INTERP segment")
+
+for user_elf in ("init.elf", "worker.elf"):
+    check_user_elf(user_elf)
 
 print("image checks: PASS")
