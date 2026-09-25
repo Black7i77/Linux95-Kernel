@@ -59,6 +59,7 @@ KERNEL_OBJS := \
 	$(BUILD)/keyboard.o \
 	$(BUILD)/ps2.o \
 	$(BUILD)/mouse.o \
+	$(BUILD)/pci.o \
 	$(BUILD)/memory.o \
 	$(BUILD)/virtual.o \
 	$(BUILD)/physical.o \
@@ -75,7 +76,7 @@ KERNEL_OBJS := \
 	$(BUILD)/vfs_self_test.o \
 	$(BUILD)/shell.o
 
-.PHONY: all clean run run-debug test test-qemu prepare-storage-test-image test-host-memory test-host-storage test-host-filesystem test-host-graphics test-memory-source test-storage-source test-relocations check-tools
+.PHONY: all clean run run-debug test test-qemu prepare-storage-test-image test-host-memory test-host-storage test-host-filesystem test-host-graphics test-host-pci test-memory-source test-storage-source test-relocations check-tools
 
 all: check-tools $(BUILD)/linux95-kernel.img
 
@@ -174,6 +175,9 @@ $(BUILD)/ps2.o: kernel/arch/ps2.cpp kernel/arch/ps2.hpp kernel/arch/io.hpp | $(B
 $(BUILD)/mouse.o: kernel/arch/mouse.cpp kernel/arch/mouse.hpp kernel/arch/mouse_helpers.hpp kernel/arch/ps2.hpp kernel/arch/io.hpp | $(BUILD)
 >$(CXX) $(CXXFLAGS) -c $< -o $@
 
+$(BUILD)/pci.o: kernel/pci/pci.cpp kernel/pci/pci.hpp | $(BUILD)
+>$(CXX) $(CXXFLAGS) -c $< -o $@
+
 
 $(BUILD)/memory.o: kernel/memory/memory.cpp kernel/memory/memory.hpp kernel/boot_info.hpp | $(BUILD)
 >$(CXX) $(CXXFLAGS) -c $< -o $@
@@ -200,6 +204,12 @@ $(BUILD)/host-page-bitmap-test: tests/host/page_bitmap_test.cpp kernel/memory/pa
 test-host-memory: $(BUILD)/host-page-bitmap-test $(BUILD)/host-e820-limit-test
 >$(BUILD)/host-page-bitmap-test
 >$(BUILD)/host-e820-limit-test
+
+$(BUILD)/host-pci-helpers-test: tests/host/pci_helpers_test.cpp kernel/pci/pci.hpp | $(BUILD)
+>$(CXX) $(HOST_CXXFLAGS) $< -o $@
+
+test-host-pci: $(BUILD)/host-pci-helpers-test
+>$(BUILD)/host-pci-helpers-test
 
 $(BUILD)/host-ata-helpers-test: tests/host/ata_helpers_test.cpp | $(BUILD)
 >$(CXX) $(HOST_CXXFLAGS) $< -o $@
@@ -330,7 +340,7 @@ test-storage-source:
 test-filesystem-source:
 >$(PYTHON) tests/filesystem_source_checks.py
 
-test: all test-host-memory test-host-storage test-host-filesystem test-host-graphics test-host-graphics
+test: all test-host-memory test-host-storage test-host-filesystem test-host-graphics test-host-pci
 >$(PYTHON) tests/source_checks.py
 >$(PYTHON) tests/image_checks.py
 >$(PYTHON) tests/memory_source_checks.py
