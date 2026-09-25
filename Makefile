@@ -578,7 +578,8 @@ test-filesystem-source:
 test-preemption-source:
 >$(PYTHON) tests/preemption_source_checks.py
 
-test: all test-preemption-source test-host-memory test-host-storage test-host-heap test-host-segments test-host-process test-host-scheduler test-host-user-space test-host-elf test-host-elf-loader-plan test-host-syscall test-host-filesystem test-host-graphics test-host-pci test-host-rtl8139-helpers test-host-kernel-virtual-to-physical test-host-ethernet test-host-arp test-host-ipv4 test-host-icmp
+test: test-preemption-source
+test: all test-host-memory test-host-storage test-host-heap test-host-segments test-host-process test-host-scheduler test-host-user-space test-host-elf test-host-elf-loader-plan test-host-syscall test-host-filesystem test-host-graphics test-host-pci test-host-rtl8139-helpers test-host-kernel-virtual-to-physical test-host-ethernet test-host-arp test-host-ipv4 test-host-icmp
 >$(PYTHON) tests/source_checks.py
 >$(PYTHON) tests/image_checks.py
 >$(PYTHON) tests/memory_source_checks.py
