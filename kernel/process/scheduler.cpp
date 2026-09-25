@@ -89,6 +89,7 @@ bool run_once()
         return true;
     }
     selected.state = process::State::Running;
+    reset_user_quantum();
     g_host_cr3 = arch::x86_64::read_cr3();
     g_host_rflags = read_rflags();
     asm volatile("cli" ::: "memory");
