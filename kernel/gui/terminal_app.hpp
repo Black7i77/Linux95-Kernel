@@ -12,10 +12,12 @@ public:
     TerminalApp();
 
     AppInstance instance();
+    bool poll();
 
 private:
     TerminalModel model_;
     terminal::Output output_;
+    terminal::NetworkCallbacks network_callbacks_;
     terminal::ShellSession session_;
 
     void draw(

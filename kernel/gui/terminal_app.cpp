@@ -1,6 +1,7 @@
 #include "gui/terminal_app.hpp"
 
 #include "graphics/renderer.hpp"
+#include "net/network.hpp"
 #include "terminal/shell.hpp"
 
 #include <stddef.h>
@@ -24,6 +25,26 @@ constexpr graphics::Color kTerminalForeground{
 constexpr int32_t kCharacterWidth = 8;
 constexpr int32_t kCharacterHeight = 8;
 
+network::Status network_status(void*)
+{
+    return network::status();
+}
+
+bool network_start_ping(void*, net::Ipv4Address destination)
+{
+    return network::start_ping(destination);
+}
+
+net::icmp::PingResult network_ping_result(void*)
+{
+    return network::ping_result();
+}
+
+void network_clear_ping_result(void*)
+{
+    network::clear_ping_result();
+}
+
 void execute_shell_command(
     void*,
     terminal::Output& output,
@@ -46,12 +67,25 @@ size_t smaller(
 TerminalApp::TerminalApp()
     : model_{},
       output_(make_output(model_)),
+      network_callbacks_{
+          nullptr,
+          network_status,
+          network_start_ping,
+          network_ping_result,
+          network_clear_ping_result,
+      },
       session_(
           output_,
           nullptr,
-          execute_shell_command)
+          execute_shell_command,
+          &network_callbacks_)
 {
     session_.begin();
+}
+
+bool TerminalApp::poll()
+{
+    return session_.poll();
 }
 
 AppInstance TerminalApp::instance()

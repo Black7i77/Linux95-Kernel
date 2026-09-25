@@ -1692,6 +1692,12 @@ graphics::Rect DirtyRegionQueue::rect(
         bool had_event = false;
 
         network::poll();
+        if (state.terminal_app.poll()) {
+            invalidate_window(
+                state,
+                kTerminalWindowId);
+            had_event = true;
+        }
 
         if (state.mouse_online) {
             while (mouse::has_event()) {

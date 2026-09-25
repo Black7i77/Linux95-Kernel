@@ -137,7 +137,7 @@ $(BUILD)/renderer.o: kernel/graphics/renderer.cpp kernel/graphics/renderer.hpp k
 $(BUILD)/terminal_model.o: kernel/gui/terminal_model.cpp kernel/gui/terminal_model.hpp kernel/terminal/output.hpp | $(BUILD)
 >$(CXX) $(CXXFLAGS) -c $< -o $@
 
-$(BUILD)/terminal_app.o: kernel/gui/terminal_app.cpp kernel/gui/terminal_app.hpp kernel/gui/app.hpp kernel/gui/terminal_model.hpp kernel/terminal/shell_session.hpp kernel/terminal/shell.hpp kernel/graphics/renderer.hpp | $(BUILD)
+$(BUILD)/terminal_app.o: kernel/gui/terminal_app.cpp kernel/gui/terminal_app.hpp kernel/gui/app.hpp kernel/gui/terminal_model.hpp kernel/terminal/shell_session.hpp kernel/terminal/shell.hpp kernel/graphics/renderer.hpp kernel/net/network.hpp | $(BUILD)
 >$(CXX) $(CXXFLAGS) -c $< -o $@
 
 $(BUILD)/system_info_app.o: kernel/gui/system_info_app.cpp kernel/gui/system_info_app.hpp kernel/gui/app.hpp kernel/graphics/renderer.hpp kernel/arch/pit.hpp kernel/memory/memory.hpp kernel/memory/physical.hpp kernel/memory/heap.hpp kernel/storage/disk.hpp kernel/filesystem/filesystem.hpp | $(BUILD)
@@ -158,7 +158,7 @@ $(BUILD)/vga.o: kernel/terminal/vga.cpp kernel/terminal/vga.hpp kernel/arch/io.h
 $(BUILD)/vga_output.o: kernel/terminal/vga_output.cpp kernel/terminal/vga_output.hpp kernel/terminal/output.hpp kernel/terminal/vga.hpp | $(BUILD)
 >$(CXX) $(CXXFLAGS) -c $< -o $@
 
-$(BUILD)/shell_session.o: kernel/terminal/shell_session.cpp kernel/terminal/shell_session.hpp kernel/terminal/output.hpp | $(BUILD)
+$(BUILD)/shell_session.o: kernel/terminal/shell_session.cpp kernel/terminal/shell_session.hpp kernel/terminal/output.hpp kernel/net/network.hpp | $(BUILD)
 >$(CXX) $(CXXFLAGS) -c $< -o $@
 
 $(BUILD)/panic.o: kernel/panic/panic.cpp kernel/panic/panic.hpp | $(BUILD)
@@ -343,7 +343,9 @@ $(BUILD)/storage_self_test.o: kernel/storage/storage_self_test.cpp kernel/storag
 $(BUILD)/shell.o: \
 	kernel/terminal/shell.cpp \
 	kernel/terminal/shell.hpp \
-	kernel/filesystem/vfs.hpp | $(BUILD)
+	kernel/filesystem/vfs.hpp \
+	kernel/net/network.hpp \
+	kernel/terminal/shell_session.hpp | $(BUILD)
 >$(CXX) $(CXXFLAGS) -c $< -o $@
 
 $(BUILD)/kernel.elf: $(KERNEL_OBJS) linker.ld
@@ -457,7 +459,7 @@ test-host-graphics: test-host-mouse-helpers
 
 .PHONY: test-host-shell-session
 
-$(BUILD)/host-shell-session-test: tests/host/shell_session_test.cpp kernel/terminal/output.hpp kernel/terminal/shell_session.hpp kernel/terminal/shell_session.cpp | $(BUILD)
+$(BUILD)/host-shell-session-test: tests/host/shell_session_test.cpp kernel/terminal/output.hpp kernel/terminal/shell_session.hpp kernel/terminal/shell_session.cpp kernel/net/network.hpp | $(BUILD)
 >$(CXX) $(HOST_CXXFLAGS) tests/host/shell_session_test.cpp kernel/terminal/shell_session.cpp -o $@
 
 test-host-shell-session: $(BUILD)/host-shell-session-test
