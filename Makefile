@@ -62,6 +62,7 @@ KERNEL_OBJS := \
 	$(BUILD)/pci.o \
 	$(BUILD)/rtl8139.o \
 	$(BUILD)/ethernet.o \
+	$(BUILD)/arp.o \
 	$(BUILD)/memory.o \
 	$(BUILD)/virtual.o \
 	$(BUILD)/physical.o \
@@ -78,7 +79,7 @@ KERNEL_OBJS := \
 	$(BUILD)/vfs_self_test.o \
 	$(BUILD)/shell.o
 
-.PHONY: all clean run run-debug test test-qemu prepare-storage-test-image test-host-memory test-host-storage test-host-filesystem test-host-graphics test-host-pci test-host-rtl8139-helpers test-host-kernel-virtual-to-physical test-host-ethernet test-memory-source test-storage-source test-relocations check-tools
+.PHONY: all clean run run-debug test test-qemu prepare-storage-test-image test-host-memory test-host-storage test-host-filesystem test-host-graphics test-host-pci test-host-rtl8139-helpers test-host-kernel-virtual-to-physical test-host-ethernet test-host-arp test-memory-source test-storage-source test-relocations check-tools
 
 all: check-tools $(BUILD)/linux95-kernel.img
 
@@ -187,6 +188,9 @@ $(BUILD)/rtl8139.o: kernel/drivers/rtl8139.cpp kernel/drivers/rtl8139.hpp kernel
 $(BUILD)/ethernet.o: kernel/net/ethernet.cpp kernel/net/ethernet.hpp kernel/net/net_types.hpp | $(BUILD)
 >$(CXX) $(CXXFLAGS) -c $< -o $@
 
+$(BUILD)/arp.o: kernel/net/arp.cpp kernel/net/arp.hpp kernel/net/net_types.hpp | $(BUILD)
+>$(CXX) $(CXXFLAGS) -c $< -o $@
+
 
 $(BUILD)/memory.o: kernel/memory/memory.cpp kernel/memory/memory.hpp kernel/memory/address.hpp kernel/boot_info.hpp | $(BUILD)
 >$(CXX) $(CXXFLAGS) -c $< -o $@
@@ -237,6 +241,12 @@ $(BUILD)/host-ethernet-test: tests/host/ethernet_test.cpp kernel/net/ethernet.cp
 
 test-host-ethernet: $(BUILD)/host-ethernet-test
 >$(BUILD)/host-ethernet-test
+
+$(BUILD)/host-arp-test: tests/host/arp_test.cpp kernel/net/arp.cpp kernel/net/arp.hpp kernel/net/net_types.hpp | $(BUILD)
+>$(CXX) $(HOST_CXXFLAGS) tests/host/arp_test.cpp kernel/net/arp.cpp -o $@
+
+test-host-arp: $(BUILD)/host-arp-test
+>$(BUILD)/host-arp-test
 
 $(BUILD)/host-ata-helpers-test: tests/host/ata_helpers_test.cpp | $(BUILD)
 >$(CXX) $(HOST_CXXFLAGS) $< -o $@
@@ -367,7 +377,7 @@ test-storage-source:
 test-filesystem-source:
 >$(PYTHON) tests/filesystem_source_checks.py
 
-test: all test-host-memory test-host-storage test-host-filesystem test-host-graphics test-host-pci test-host-rtl8139-helpers test-host-kernel-virtual-to-physical test-host-ethernet
+test: all test-host-memory test-host-storage test-host-filesystem test-host-graphics test-host-pci test-host-rtl8139-helpers test-host-kernel-virtual-to-physical test-host-ethernet test-host-arp
 >$(PYTHON) tests/source_checks.py
 >$(PYTHON) tests/image_checks.py
 >$(PYTHON) tests/memory_source_checks.py
