@@ -16,17 +16,19 @@ enum class WindowState : uint8_t {
 };
 
 struct Window {
-    WindowId id = 0;
-    Rect bounds{};
-    Rect restore_bounds{};
-    WindowState state = WindowState::Closed;
-    uint8_t z = 0;
-    bool resizable = false;
-    bool closable = false;
+    WindowId id;
+    Rect bounds;
+    Rect restore_bounds;
+    WindowState state;
+    uint8_t z;
+    bool resizable;
+    bool closable;
 };
 
 class WindowManager {
 public:
+    WindowManager();
+
     static constexpr size_t kMaxWindows = 8;
 
     static constexpr int32_t kScreenWidth = 1280;
@@ -71,17 +73,16 @@ private:
         Resize,
     };
 
-    Window windows_[kMaxWindows]{};
+    Window windows_[kMaxWindows];
 
-    WindowId focused_ = 0;
+    WindowId focused_;
 
-    PointerAction pointer_action_ =
-        PointerAction::None;
+    PointerAction pointer_action_;
 
-    WindowId pointer_window_ = 0;
+    WindowId pointer_window_;
 
-    Point pointer_start_{};
-    Rect pointer_start_bounds_{};
+    Point pointer_start_;
+    Rect pointer_start_bounds_;
 
     Window* find_mutable(WindowId id);
 

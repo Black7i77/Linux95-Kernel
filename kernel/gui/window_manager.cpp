@@ -57,6 +57,21 @@ Rect WindowManager::clamp_bounds(
     return bounds;
 }
 
+WindowManager::WindowManager()
+    : focused_(0),
+      pointer_action_(PointerAction::None),
+      pointer_window_(0),
+      pointer_start_{0, 0},
+      pointer_start_bounds_{0, 0, 0, 0}
+{
+    for (size_t i = 0;
+         i < kMaxWindows;
+         ++i) {
+        windows_[i].state =
+            WindowState::Closed;
+    }
+}
+
 Window* WindowManager::find_mutable(
     WindowId id)
 {
