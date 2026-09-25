@@ -249,6 +249,11 @@ struct RuntimeState {
 
     gui::Point mouse_position;
 
+    uint32_t cursor_backing[
+        kCursorWidth *
+        kCursorHeight];
+    bool cursor_drawn;
+
     bool left_down;
     gui::WindowId pointer_window;
 
@@ -275,6 +280,7 @@ struct RuntimeState {
               kScreenWidth / 2,
               kScreenHeight / 2,
           },
+          cursor_drawn(false),
           left_down(false),
           pointer_window(0),
           menu_open(false),
@@ -722,23 +728,100 @@ void draw_panel(
         kBlack);
 }
 
-void draw_cursor(
+uint32_t read_framebuffer_pixel(
     RuntimeState& state,
-    graphics::Rect dirty)
+    int32_t x,
+    int32_t y)
 {
-    if (!state.mouse_online) {
+    const uint64_t offset =
+        static_cast<uint64_t>(y) *
+            state.framebuffer.pitch +
+        static_cast<uint64_t>(x) *
+            sizeof(uint32_t);
+
+    volatile uint32_t* const pixel =
+        reinterpret_cast<volatile uint32_t*>(
+            state.framebuffer.data +
+            offset);
+
+    return *pixel;
+}
+
+void write_framebuffer_pixel(
+    RuntimeState& state,
+    int32_t x,
+    int32_t y,
+    uint32_t value)
+{
+    const uint64_t offset =
+        static_cast<uint64_t>(y) *
+            state.framebuffer.pitch +
+        static_cast<uint64_t>(x) *
+            sizeof(uint32_t);
+
+    volatile uint32_t* const pixel =
+        reinterpret_cast<volatile uint32_t*>(
+            state.framebuffer.data +
+            offset);
+
+    *pixel = value;
+}
+
+void restore_cursor(
+    RuntimeState& state)
+{
+    if (
+        !state.mouse_online ||
+        !state.cursor_drawn) {
         return;
     }
 
-    const graphics::Rect cursor =
-        cursor_rect_at(
-            state.mouse_position);
+    size_t index = 0;
 
+    for (
+        int32_t y = 0;
+        y < kCursorHeight;
+        ++y) {
+        for (
+            int32_t x = 0;
+            x < kCursorWidth;
+            ++x) {
+            write_framebuffer_pixel(
+                state,
+                state.mouse_position.x + x,
+                state.mouse_position.y + y,
+                state.cursor_backing[index++]);
+        }
+    }
+
+    state.cursor_drawn = false;
+}
+
+void draw_cursor_overlay(
+    RuntimeState& state)
+{
     if (
-        !intersects(
-            cursor,
-            dirty)) {
+        !state.mouse_online ||
+        state.cursor_drawn) {
         return;
+    }
+
+    size_t index = 0;
+
+    for (
+        int32_t y = 0;
+        y < kCursorHeight;
+        ++y) {
+        for (
+            int32_t x = 0;
+            x < kCursorWidth;
+            ++x) {
+            state.cursor_backing[index++] =
+                read_framebuffer_pixel(
+                    state,
+                    state.mouse_position.x + x,
+                    state.mouse_position.y + y);
+        }
     }
 
     const int32_t x =
@@ -747,32 +830,32 @@ void draw_cursor(
     const int32_t y =
         state.mouse_position.y;
 
+    // White outside edge keeps the cursor visible over the
+    // black terminal; black inside edge keeps it visible over
+    // bright windows and the panel.
     graphics::draw_line(
         state.framebuffer,
         x,
         y,
         x,
-        y +
-            kCursorHeight - 1,
-        kBlack);
+        y + kCursorHeight - 1,
+        kWhite);
 
     graphics::draw_line(
         state.framebuffer,
         x,
         y,
-        x +
-            kCursorWidth - 1,
+        x + kCursorWidth - 1,
         y + 10,
-        kBlack);
+        kWhite);
 
     graphics::draw_line(
         state.framebuffer,
         x,
-        y +
-            kCursorHeight - 1,
+        y + kCursorHeight - 1,
         x + 4,
         y + 13,
-        kBlack);
+        kWhite);
 
     graphics::draw_line(
         state.framebuffer,
@@ -780,7 +863,17 @@ void draw_cursor(
         y + 1,
         x + 1,
         y + 12,
-        kWhite);
+        kBlack);
+
+    graphics::draw_line(
+        state.framebuffer,
+        x + 1,
+        y + 1,
+        x + kCursorWidth - 2,
+        y + 10,
+        kBlack);
+
+    state.cursor_drawn = true;
 }
 
 void redraw_region(
@@ -880,10 +973,6 @@ void redraw_region(
         state,
         dirty);
 
-    // 4. Cursor.
-    draw_cursor(
-        state,
-        dirty);
 }
 
 bool redraw_dirty(
@@ -896,6 +985,8 @@ bool redraw_dirty(
         return false;
     }
 
+    restore_cursor(state);
+
     for (
         size_t i = 0;
         i < count;
@@ -906,6 +997,8 @@ bool redraw_dirty(
     }
 
     state.dirty.clear();
+
+    draw_cursor_overlay(state);
 
     return true;
 }
@@ -1186,9 +1279,7 @@ void process_mouse_event(
     RuntimeState& state,
     const mouse::MouseEvent& event)
 {
-    state.dirty.invalidate(
-        cursor_rect_at(
-            state.mouse_position));
+    restore_cursor(state);
 
     gui::Point next{
         state.mouse_position.x +
@@ -1270,9 +1361,6 @@ void process_mouse_event(
     state.left_down =
         event.left;
 
-    state.dirty.invalidate(
-        cursor_rect_at(
-            state.mouse_position));
 }
 
 void process_keyboard(
@@ -1351,7 +1439,7 @@ gui::Point clamp_cursor(
     point.y =
         clamp_value(
             point.y,
-            kPanelHeight,
+            0,
             kScreenHeight -
                 kCursorHeight);
 
@@ -1725,6 +1813,12 @@ graphics::Rect DirtyRegionQueue::rect(
 
         const bool had_dirty =
             redraw_dirty(state);
+
+        if (
+            state.mouse_online &&
+            !state.cursor_drawn) {
+            draw_cursor_overlay(state);
+        }
 
         if (
             !had_event &&
