@@ -20,6 +20,8 @@ size_t g_reaped_process_count = 0;
 bool g_desktop_survival_emitted = false;
 HostReason g_last_host_reason = HostReason::Yield;
 
+uint32_t g_user_quantum_ticks_remaining = 0;
+
 uint64_t read_rflags()
 {
     uint64_t value = 0;
@@ -32,6 +34,21 @@ void write_rflags(uint64_t value)
     asm volatile("push %0; popfq" : : "r"(value) : "cc", "memory");
 }
 
+}
+
+void reset_user_quantum()
+{
+    g_user_quantum_ticks_remaining = kUserQuantumTicks;
+}
+
+bool on_timer_tick(bool from_user)
+{
+    if (!from_user || g_user_quantum_ticks_remaining == 0) {
+        return false;
+    }
+
+    --g_user_quantum_ticks_remaining;
+    return g_user_quantum_ticks_remaining == 0;
 }
 
 int choose_next(const linux95::process::Process* table,
