@@ -16,6 +16,11 @@ def main():
         return 2
 
     image = Path(sys.argv[1]).resolve()
+    user_init = Path("build/user/init.elf").resolve()
+    user_worker = Path("build/user/worker.elf").resolve()
+    if not user_init.is_file() or not user_worker.is_file():
+        print("missing build/user/init.elf or build/user/worker.elf")
+        return 1
     image.parent.mkdir(parents=True, exist_ok=True)
     image.unlink(missing_ok=True)
 
@@ -52,6 +57,12 @@ def main():
         ])
 
         run([
+            "mmd",
+            "-i", str(image),
+            "::USER",
+        ])
+
+        run([
             "mcopy",
             "-o",
             "-i", str(image),
@@ -74,6 +85,25 @@ def main():
             str(fixture / "KERNEL.TXT"),
             "::DOCS/KERNEL.TXT",
         ])
+
+        run([
+            "mcopy",
+            "-o",
+            "-i", str(image),
+            str(user_init),
+            "::USER/INIT.ELF",
+        ])
+
+        run([
+            "mcopy",
+            "-o",
+            "-i", str(image),
+            str(user_worker),
+            "::USER/WORKER.ELF",
+        ])
+
+        for path in ("::USER/INIT.ELF", "::USER/WORKER.ELF"):
+            run(["mdir", "-i", str(image), path])
 
     print(f"FAT32 fixture created: {image}")
     return 0

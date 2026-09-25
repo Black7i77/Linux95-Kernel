@@ -10,6 +10,12 @@ READELF := readelf
 PYTHON := python3
 QEMU := qemu-system-x86_64
 
+USER_CXXFLAGS := -std=c++17 -m64 -mcmodel=large -ffreestanding -fno-builtin \
+	-fno-exceptions -fno-rtti -fno-stack-protector -fno-pie \
+	-fno-threadsafe-statics -fno-use-cxa-atexit -mno-red-zone \
+	-mno-mmx -mno-sse -mno-sse2 -fno-asynchronous-unwind-tables \
+	-fno-unwind-tables -Wall -Wextra -Werror -O2 -Iuser/include
+
 SECTOR := 512
 STAGE2_SECTORS := 16
 KERNEL_LBA := 17
@@ -92,7 +98,7 @@ NETWORK_TEST_IMAGE := $(BUILD)/linux95-kernel-network-test.img
 
 .PHONY: all clean run run-debug test test-qemu prepare-storage-test-image test-host-segments test-host-process test-host-scheduler test-host-user-space test-host-elf test-host-memory test-host-storage test-host-filesystem test-host-graphics test-host-pci test-host-rtl8139-helpers test-host-kernel-virtual-to-physical test-host-ethernet test-host-arp test-host-ipv4 test-host-icmp test-memory-source test-storage-source test-relocations check-tools
 
-all: check-tools $(BUILD)/linux95-kernel.img
+all: check-tools $(BUILD)/linux95-kernel.img $(BUILD)/user/init.elf $(BUILD)/user/worker.elf
 
 check-tools:
 >@for tool in $(NASM) $(CXX) $(LD) $(OBJCOPY) $(READELF) $(PYTHON); do \
@@ -104,6 +110,24 @@ done
 
 $(BUILD):
 >mkdir -p $(BUILD)
+
+$(BUILD)/user:
+>mkdir -p $@
+
+$(BUILD)/user/start.o: user/crt/start.asm | $(BUILD)/user
+>$(NASM) -f elf64 $< -o $@
+
+$(BUILD)/user/init.o: user/init/main.cpp user/include/linux95_syscall.hpp | $(BUILD)/user
+>$(CXX) $(USER_CXXFLAGS) -c $< -o $@
+
+$(BUILD)/user/worker.o: user/worker/main.cpp user/include/linux95_syscall.hpp | $(BUILD)/user
+>$(CXX) $(USER_CXXFLAGS) -c $< -o $@
+
+$(BUILD)/user/init.elf: $(BUILD)/user/start.o $(BUILD)/user/init.o user/user.ld
+>$(LD) -nostdlib -static -no-pie -z max-page-size=0x1000 -T user/user.ld -o $@ $(BUILD)/user/start.o $(BUILD)/user/init.o
+
+$(BUILD)/user/worker.elf: $(BUILD)/user/start.o $(BUILD)/user/worker.o user/user.ld
+>$(LD) -nostdlib -static -no-pie -z max-page-size=0x1000 -T user/user.ld -o $@ $(BUILD)/user/start.o $(BUILD)/user/worker.o
 
 $(BUILD)/stage1.bin: boot/stage1.asm | $(BUILD)
 >$(NASM) -f bin $< -o $@
