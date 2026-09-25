@@ -9,6 +9,8 @@
 #include "arch/mouse.hpp"
 #include "arch/pic.hpp"
 #include "arch/pit.hpp"
+#include "arch/x86_64/segments.hpp"
+#include "arch/x86_64/tss.hpp"
 #include "memory/address.hpp"
 #include "memory/heap.hpp"
 #include "memory/memory.hpp"
@@ -170,6 +172,8 @@ extern "C" [[noreturn]] void linux95_higher_half_entry(
         debug::write("[WARN] network_offline\n");
     }
 
+    arch::x86_64::initialize_segments();
+    arch::x86_64::initialize_tss();
     interrupts::initialize();
     pic::initialize();
     pit::initialize(100);
@@ -188,7 +192,11 @@ extern "C" [[noreturn]] void linux95_higher_half_entry(
         debug::write("[INFO] mouse_unavailable\n");
     }
 
+    debug::write("[DBG] before_sti\n");
+    debug::write("[DBG] before_sti\n");
     io::enable_interrupts();
+    debug::write("[DBG] after_sti\n");
+    debug::write("[DBG] after_sti\n");
 
 #ifdef LINUX95_QEMU_NETWORK_SELF_TEST
     (void)network::start_ping(

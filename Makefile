@@ -46,6 +46,7 @@ KERNEL_OBJS := \
 	$(BUILD)/entry.o \
 	$(BUILD)/interrupts_asm.o \
 	$(BUILD)/paging_bootstrap.o \
+	$(BUILD)/segments_asm.o \
 	$(BUILD)/kernel.o \
 	$(BUILD)/vga.o $(BUILD)/vga_output.o $(BUILD)/shell_session.o $(BUILD)/framebuffer.o $(BUILD)/renderer.o \
         $(BUILD)/terminal_model.o $(BUILD)/terminal_app.o \
@@ -70,6 +71,8 @@ KERNEL_OBJS := \
 	$(BUILD)/virtual.o \
 	$(BUILD)/physical.o \
 	$(BUILD)/paging.o \
+	$(BUILD)/segments.o \
+	$(BUILD)/tss.o \
 	$(BUILD)/self_test.o \
 	$(BUILD)/heap.o \
 	$(BUILD)/ata.o \
@@ -85,7 +88,7 @@ KERNEL_OBJS := \
 NETWORK_TEST_OBJS := $(subst $(BUILD)/kernel.o,$(BUILD)/kernel-network-test.o,$(KERNEL_OBJS))
 NETWORK_TEST_IMAGE := $(BUILD)/linux95-kernel-network-test.img
 
-.PHONY: all clean run run-debug test test-qemu prepare-storage-test-image test-host-memory test-host-storage test-host-filesystem test-host-graphics test-host-pci test-host-rtl8139-helpers test-host-kernel-virtual-to-physical test-host-ethernet test-host-arp test-host-ipv4 test-host-icmp test-memory-source test-storage-source test-relocations check-tools
+.PHONY: all clean run run-debug test test-qemu prepare-storage-test-image test-host-segments test-host-memory test-host-storage test-host-filesystem test-host-graphics test-host-pci test-host-rtl8139-helpers test-host-kernel-virtual-to-physical test-host-ethernet test-host-arp test-host-ipv4 test-host-icmp test-memory-source test-storage-source test-relocations check-tools
 
 all: check-tools $(BUILD)/linux95-kernel.img
 
@@ -126,9 +129,14 @@ $(BUILD)/interrupts_asm.o: kernel/arch/interrupts.asm | $(BUILD)
 $(BUILD)/paging_bootstrap.o: kernel/arch/x86_64/paging_bootstrap.asm | $(BUILD)
 >$(NASM) -f elf64 $< -o $@
 
+$(BUILD)/segments_asm.o: kernel/arch/x86_64/segments.asm | $(BUILD)
+>$(NASM) -f elf64 $< -o $@
+
 $(BUILD)/kernel.o: \
 	kernel/kernel.cpp \
 	kernel/boot_info.hpp \
+	kernel/arch/x86_64/segments.hpp \
+	kernel/arch/x86_64/tss.hpp \
 	kernel/filesystem/vfs.hpp \
 	kernel/net/network.hpp \
 	kernel/filesystem/vfs_self_test.hpp | $(BUILD)
@@ -137,6 +145,8 @@ $(BUILD)/kernel.o: \
 $(BUILD)/kernel-network-test.o: \
 	kernel/kernel.cpp \
 	kernel/boot_info.hpp \
+	kernel/arch/x86_64/segments.hpp \
+	kernel/arch/x86_64/tss.hpp \
 	kernel/filesystem/vfs.hpp \
 	kernel/net/network.hpp \
 	kernel/filesystem/vfs_self_test.hpp | $(BUILD)
@@ -227,12 +237,24 @@ $(BUILD)/physical.o: kernel/memory/physical.cpp kernel/memory/physical.hpp kerne
 $(BUILD)/paging.o: kernel/memory/paging.cpp kernel/memory/paging.hpp kernel/memory/physical.hpp kernel/memory/address.hpp kernel/arch/x86_64/control_regs.hpp | $(BUILD)
 >$(CXX) $(CXXFLAGS) -c $< -o $@
 
+$(BUILD)/segments.o: kernel/arch/x86_64/segments.cpp kernel/arch/x86_64/segments.hpp kernel/arch/x86_64/tss.hpp | $(BUILD)
+>$(CXX) $(CXXFLAGS) -c $< -o $@
+
+$(BUILD)/tss.o: kernel/arch/x86_64/tss.cpp kernel/arch/x86_64/tss.hpp kernel/arch/x86_64/segments.hpp | $(BUILD)
+>$(CXX) $(CXXFLAGS) -c $< -o $@
+
 $(BUILD)/self_test.o: kernel/memory/self_test.cpp kernel/memory/self_test.hpp kernel/memory/paging.hpp kernel/memory/physical.hpp kernel/memory/address.hpp | $(BUILD)
 >$(CXX) $(CXXFLAGS) -c $< -o $@
 
 
 $(BUILD)/host-e820-limit-test: tests/host/e820_limit_test.cpp kernel/memory/memory.cpp kernel/memory/memory.hpp kernel/boot_info.hpp | $(BUILD)
 >$(CXX) $(HOST_CXXFLAGS) tests/host/e820_limit_test.cpp kernel/memory/memory.cpp -o $@
+
+$(BUILD)/host-segments-test: tests/host/segments_test.cpp | $(BUILD)
+>$(CXX) $(HOST_CXXFLAGS) $< -o $@
+
+test-host-segments: $(BUILD)/host-segments-test
+>$(BUILD)/host-segments-test
 
 $(BUILD)/host-page-bitmap-test: tests/host/page_bitmap_test.cpp kernel/memory/page_bitmap.hpp kernel/memory/address.hpp | $(BUILD)
 >$(CXX) $(HOST_CXXFLAGS) $< -o $@
@@ -445,7 +467,7 @@ test-storage-source:
 test-filesystem-source:
 >$(PYTHON) tests/filesystem_source_checks.py
 
-test: all test-host-memory test-host-storage test-host-filesystem test-host-graphics test-host-pci test-host-rtl8139-helpers test-host-kernel-virtual-to-physical test-host-ethernet test-host-arp test-host-ipv4 test-host-icmp
+test: all test-host-memory test-host-storage test-host-segments test-host-filesystem test-host-graphics test-host-pci test-host-rtl8139-helpers test-host-kernel-virtual-to-physical test-host-ethernet test-host-arp test-host-ipv4 test-host-icmp
 >$(PYTHON) tests/source_checks.py
 >$(PYTHON) tests/image_checks.py
 >$(PYTHON) tests/memory_source_checks.py

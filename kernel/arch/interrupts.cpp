@@ -4,6 +4,7 @@
 #include "arch/mouse.hpp"
 #include "arch/pic.hpp"
 #include "arch/pit.hpp"
+#include "arch/x86_64/segments.hpp"
 #include "panic/panic.hpp"
 
 #include <stddef.h>
@@ -39,7 +40,7 @@ void set_gate(uint8_t vector, void (*handler)())
 
     IdtEntry& entry = g_idt[vector];
     entry.offset_low = static_cast<uint16_t>(address & 0xFFFFu);
-    entry.selector = 0x18;
+    entry.selector = arch::x86_64::kKernelCodeSelector;
     entry.ist = 0;
     entry.type_attributes = 0x8E;
     entry.offset_mid =

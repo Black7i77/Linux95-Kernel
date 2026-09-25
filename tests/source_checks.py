@@ -103,6 +103,10 @@ require("kernel/arch/interrupts.asm", "iretq")
 require("kernel/arch/interrupts.cpp", "set_gate")
 require("kernel/arch/pic.cpp", "0x20")
 require("kernel/arch/pit.cpp", "1193182")
+require("kernel/arch/x86_64/segments.hpp", "kUserDataSelector = 0x1B")
+require("kernel/arch/x86_64/segments.hpp", "kUserCodeSelector = 0x23")
+require("kernel/arch/x86_64/segments.asm", "ltr ax")
+require("kernel/arch/x86_64/tss.cpp", "void set_tss_rsp0(uint64_t rsp0)")
 require("kernel/arch/keyboard.cpp", "kBufferSize = 128")
 require("kernel/terminal/shell.cpp", '"help"')
 require("kernel/terminal/shell.cpp", '"reboot"')
@@ -118,3 +122,7 @@ if "Linux95 Kernel v0.1" in (ROOT / "kernel/kernel.cpp").read_text():
     raise SystemExit("FAIL: stale v0.1 kernel banner found")
 
 print("source checks: PASS")
+require(
+    "kernel/arch/interrupts.cpp",
+    "entry.selector = arch::x86_64::kKernelCodeSelector;",
+)
