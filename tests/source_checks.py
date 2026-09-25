@@ -69,6 +69,31 @@ def require_rtl8139_hardware_isolation():
             raise SystemExit(
                 f"FAIL: RTL8139 driver duplicates DMA translation: {forbidden}")
 
+def require_network_coordinator_contract():
+    network_path = ROOT / "kernel/net/network.cpp"
+    if not network_path.is_file():
+        raise SystemExit("FAIL: missing file: kernel/net/network.cpp")
+
+    network_source = network_path.read_text()
+    required = (
+        "Ipv4Address{{10, 0, 2, 15}}",
+        "Ipv4Address{{255, 255, 255, 0}}",
+        "Ipv4Address{{10, 0, 2, 2}}",
+        "kMaxFramesPerPoll = 8",
+    )
+    for contract in required:
+        if contract not in network_source:
+            raise SystemExit(
+                f"FAIL: network coordinator contract missing: {contract}")
+
+    compact_source = "".join(network_source.split())
+    if "while(rtl8139::poll_receive(" in compact_source:
+        raise SystemExit("FAIL: unbounded RTL8139 receive loop introduced")
+
+    desktop_source = (ROOT / "kernel/gui/desktop.cpp").read_text()
+    if "network::poll();" not in desktop_source:
+        raise SystemExit("FAIL: network::poll() missing from graphical runtime loop")
+
 require("kernel/boot_info.hpp", "static_assert(sizeof(FramebufferInfo) == 28")
 require("kernel/boot_info.hpp", "static_assert(sizeof(BootInfo) == 45")
 require("kernel/boot_info.hpp", "static_assert(sizeof(E820Entry) == 24")
@@ -87,6 +112,7 @@ require("kernel/kernel.cpp", "[PASS] memory_self_test")
 require("linker.ld", ". = 0x100000;")
 
 require_rtl8139_hardware_isolation()
+require_network_coordinator_contract()
 
 if "Linux95 Kernel v0.1" in (ROOT / "kernel/kernel.cpp").read_text():
     raise SystemExit("FAIL: stale v0.1 kernel banner found")

@@ -9,7 +9,6 @@
 #include "arch/mouse.hpp"
 #include "arch/pic.hpp"
 #include "arch/pit.hpp"
-#include "drivers/rtl8139.hpp"
 #include "memory/address.hpp"
 #include "memory/heap.hpp"
 #include "memory/memory.hpp"
@@ -17,6 +16,7 @@
 #include "memory/physical.hpp"
 #include "memory/self_test.hpp"
 #include "memory/virtual.hpp"
+#include "net/network.hpp"
 #include "panic/panic.hpp"
 #include "pci/pci.hpp"
 #include "filesystem/filesystem.hpp"
@@ -166,17 +166,8 @@ extern "C" [[noreturn]] void linux95_higher_half_entry(
     }
 
     debug::write("[PASS] pci_bus_ready\n");
-    pci::Address rtl8139_address{};
-    if (!pci::find_device(0x10EC, 0x8139, rtl8139_address)) {
-        debug::write("[WARN] pci_no_rtl8139\n");
+    if (!network::initialize()) {
         debug::write("[WARN] network_offline\n");
-    } else {
-        debug::write("[PASS] rtl8139_detected\n");
-        if (rtl8139::initialize()) {
-            debug::write("[PASS] rtl8139_initialized\n");
-        } else {
-            debug::write("[WARN] network_offline\n");
-        }
     }
 
     interrupts::initialize();

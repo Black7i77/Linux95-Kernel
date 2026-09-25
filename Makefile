@@ -65,6 +65,7 @@ KERNEL_OBJS := \
 	$(BUILD)/arp.o \
 	$(BUILD)/ipv4.o \
 	$(BUILD)/icmp.o \
+	$(BUILD)/network.o \
 	$(BUILD)/memory.o \
 	$(BUILD)/virtual.o \
 	$(BUILD)/physical.o \
@@ -125,8 +126,8 @@ $(BUILD)/paging_bootstrap.o: kernel/arch/x86_64/paging_bootstrap.asm | $(BUILD)
 $(BUILD)/kernel.o: \
 	kernel/kernel.cpp \
 	kernel/boot_info.hpp \
-	kernel/drivers/rtl8139.hpp \
 	kernel/filesystem/vfs.hpp \
+	kernel/net/network.hpp \
 	kernel/filesystem/vfs_self_test.hpp | $(BUILD)
 >$(CXX) $(CXXFLAGS) -c $< -o $@
 
@@ -145,7 +146,7 @@ $(BUILD)/system_info_app.o: kernel/gui/system_info_app.cpp kernel/gui/system_inf
 $(BUILD)/window_manager.o: kernel/gui/window_manager.cpp kernel/gui/window_manager.hpp kernel/gui/geometry.hpp | $(BUILD)
 >$(CXX) $(CXXFLAGS) -c $< -o $@
 
-$(BUILD)/desktop.o: kernel/gui/desktop.cpp kernel/gui/desktop.hpp kernel/gui/window_manager.hpp kernel/gui/app.hpp kernel/gui/terminal_app.hpp kernel/gui/system_info_app.hpp kernel/graphics/renderer.hpp kernel/arch/debug.hpp kernel/arch/io.hpp kernel/arch/keyboard.hpp kernel/arch/mouse.hpp kernel/arch/pit.hpp | $(BUILD)
+$(BUILD)/desktop.o: kernel/gui/desktop.cpp kernel/gui/desktop.hpp kernel/gui/window_manager.hpp kernel/gui/app.hpp kernel/gui/terminal_app.hpp kernel/gui/system_info_app.hpp kernel/graphics/renderer.hpp kernel/arch/debug.hpp kernel/arch/io.hpp kernel/arch/keyboard.hpp kernel/arch/mouse.hpp kernel/arch/pit.hpp kernel/net/network.hpp | $(BUILD)
 >$(CXX) $(CXXFLAGS) -c $< -o $@
 
 $(BUILD)/framebuffer.o: kernel/graphics/framebuffer.cpp kernel/graphics/framebuffer.hpp kernel/graphics/framebuffer_helpers.hpp kernel/boot_info.hpp kernel/memory/paging.hpp | $(BUILD)
@@ -197,6 +198,9 @@ $(BUILD)/ipv4.o: kernel/net/ipv4.cpp kernel/net/ipv4.hpp kernel/net/net_types.hp
 >$(CXX) $(CXXFLAGS) -c $< -o $@
 
 $(BUILD)/icmp.o: kernel/net/icmp.cpp kernel/net/icmp.hpp kernel/net/net_types.hpp | $(BUILD)
+>$(CXX) $(CXXFLAGS) -c $< -o $@
+
+$(BUILD)/network.o: kernel/net/network.cpp kernel/net/network.hpp kernel/net/arp.hpp kernel/net/ethernet.hpp kernel/net/icmp.hpp kernel/net/ipv4.hpp kernel/drivers/rtl8139.hpp kernel/arch/debug.hpp kernel/arch/pit.hpp | $(BUILD)
 >$(CXX) $(CXXFLAGS) -c $< -o $@
 
 
