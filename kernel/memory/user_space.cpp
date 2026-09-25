@@ -4,6 +4,7 @@
 #include "memory/physical.hpp"
 
 #include "arch/x86_64/control_regs.hpp"
+#include "arch/x86_64/msr.hpp"
 
 namespace linux95::memory {
 namespace {
@@ -68,10 +69,7 @@ void release_table(uint64_t physical, int level)
 
 bool access_allowed(const PageInfo& page, UserAccess access)
 {
-    if (!page.present || !page.user) {
-        return false;
-    }
-    return access != UserAccess::Write || page.writable;
+    return user_page_access_allowed(page, access);
 }
 
 } // namespace
@@ -130,11 +128,15 @@ bool map_user_page(UserAddressSpace& address_space,
                    bool writable,
                    bool executable)
 {
-    (void)executable;
     if (address_space.root_physical == paging::kInvalidAddress ||
         !is_page_aligned(virtual_address) ||
         !is_page_aligned(physical_address) ||
         !is_canonical_user_address(virtual_address)) {
+        return false;
+    }
+    uint64_t flags = 0;
+    if (!make_user_page_flags(
+            writable, executable, arch::x86_64::nxe_enabled(), flags)) {
         return false;
     }
     uint64_t* pml4 = table(address_space.root_physical);
@@ -149,8 +151,7 @@ bool map_user_page(UserAddressSpace& address_space,
     uint64_t* pt = table(pt_physical);
     uint64_t& pte = pt[paging::pt_index(virtual_address)];
     if ((pte & kPresentBit) != 0) return false;
-    pte = (physical_address & kAddressMask) | kPresentBit | kUserBit |
-          (writable ? kWriteBit : 0);
+    pte = (physical_address & kAddressMask) | flags;
     return true;
 }
 

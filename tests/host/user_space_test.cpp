@@ -28,6 +28,21 @@ int main() {
         {true, false, true, false, 0x2000},
     };
     assert(!validate_page_sequence(pages, 2, UserAccess::Read));
+    assert(user_page_access_allowed(pages[0], UserAccess::Read));
+    assert(!user_page_access_allowed(pages[0], UserAccess::Execute));
+
+    uint64_t page_flags = 0;
+    assert(make_user_page_flags(true, true, true, page_flags));
+    assert((page_flags & paging::kPageUser) != 0);
+    assert((page_flags & paging::kPageWritable) != 0);
+    assert((page_flags & paging::kPageNoExecute) == 0);
+
+    assert(make_user_page_flags(false, false, true, page_flags));
+    assert((page_flags & paging::kPageUser) != 0);
+    assert((page_flags & paging::kPageWritable) == 0);
+    assert((page_flags & paging::kPageNoExecute) != 0);
+
+    assert(!make_user_page_flags(false, false, false, page_flags));
 
     return 0;
 }

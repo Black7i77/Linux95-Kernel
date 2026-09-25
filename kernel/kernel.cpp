@@ -10,6 +10,7 @@
 #include "arch/pic.hpp"
 #include "arch/pit.hpp"
 #include "arch/x86_64/segments.hpp"
+#include "arch/x86_64/msr.hpp"
 #include "arch/x86_64/tss.hpp"
 #include "memory/address.hpp"
 #include "memory/heap.hpp"
@@ -135,6 +136,12 @@ extern "C" [[noreturn]] void linux95_higher_half_entry(
     }
 
     debug::write("[PASS] higher_half_entry\n");
+
+    if (arch::x86_64::enable_nxe()) {
+        debug::write("[PASS] nx_enabled\n");
+    } else {
+        debug::write("[INFO] nx_unavailable\n");
+    }
 
     constexpr uint64_t kVgaPhysical = 0x000B8000ULL;
     if (!memory::virtual_memory::hhdm_contains(kVgaPhysical)) {

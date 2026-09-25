@@ -28,6 +28,21 @@ struct UserPageSpan {
     uint64_t last_page;
 };
 
+constexpr bool make_user_page_flags(bool writable,
+                                    bool executable,
+                                    bool nxe_enabled,
+                                    uint64_t& flags)
+{
+    flags = 0;
+    if (!executable && !nxe_enabled) {
+        return false;
+    }
+    flags = paging::kPagePresent | paging::kPageUser |
+            (writable ? paging::kPageWritable : 0) |
+            (!executable ? paging::kPageNoExecute : 0);
+    return true;
+}
+
 constexpr bool is_canonical_user_address(uint64_t address)
 {
     return address < 0x0000800000000000ULL;
@@ -52,18 +67,27 @@ constexpr UserPageSpan user_page_span(uint64_t address, size_t length)
     return {first, last};
 }
 
+constexpr bool user_page_access_allowed(const PageInfo& page,
+                                        UserAccess access)
+{
+    if (!page.present || !page.user) {
+        return false;
+    }
+    if (access == UserAccess::Write) {
+        return page.writable;
+    }
+    if (access == UserAccess::Execute) {
+        return page.executable;
+    }
+    return true;
+}
+
 inline bool validate_page_sequence(const PageInfo* pages,
                                    size_t count,
                                    UserAccess access)
 {
     for (size_t i = 0; i < count; ++i) {
-        if (!pages[i].present || !pages[i].user) {
-            return false;
-        }
-        if (access == UserAccess::Write && !pages[i].writable) {
-            return false;
-        }
-        if (access == UserAccess::Execute && !pages[i].executable) {
+        if (!user_page_access_allowed(pages[i], access)) {
             return false;
         }
     }

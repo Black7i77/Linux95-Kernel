@@ -1,6 +1,7 @@
 #include "memory/paging.hpp"
 
 #include "arch/x86_64/control_regs.hpp"
+#include "arch/x86_64/msr.hpp"
 #include "memory/address.hpp"
 #include "memory/physical.hpp"
 
@@ -80,7 +81,9 @@ bool map_page(uint64_t virtual_address,
               uint64_t flags)
 {
     if (!is_page_aligned(virtual_address) ||
-        !is_page_aligned(physical_address)) {
+        !is_page_aligned(physical_address) ||
+        ((flags & kPageNoExecute) != 0 &&
+         !arch::x86_64::nxe_enabled())) {
         return false;
     }
 
