@@ -8,6 +8,67 @@ def require(path, needle):
     if needle not in text:
         raise SystemExit(f"FAIL: {needle!r} missing from {path}")
 
+def require_rtl8139_hardware_isolation():
+    rtl_source_path = ROOT / "kernel/drivers/rtl8139.cpp"
+    rtl_header_path = ROOT / "kernel/drivers/rtl8139.hpp"
+
+    if not rtl_source_path.is_file():
+        raise SystemExit("FAIL: missing file: kernel/drivers/rtl8139.cpp")
+    if not rtl_header_path.is_file():
+        raise SystemExit("FAIL: missing file: kernel/drivers/rtl8139.hpp")
+
+    for path in (ROOT / "kernel").rglob("*"):
+        if path.suffix not in {".cpp", ".hpp"}:
+            continue
+        text = path.read_text()
+        if path != ROOT / "kernel/pci/pci.cpp":
+            for port in ("0xCF8", "0xCFC"):
+                if port in text:
+                    relative = path.relative_to(ROOT)
+                    raise SystemExit(
+                        f"FAIL: PCI config port {port} outside pci.cpp: {relative}")
+
+    rtl_source = rtl_source_path.read_text()
+    register_offsets = (
+        "kIdr0 = 0x00",
+        "kTxStatus0 = 0x10",
+        "kTxAddress0 = 0x20",
+        "kRxBufferStart = 0x30",
+        "kCommand = 0x37",
+        "kCurrentAddress = 0x38",
+        "kInterruptMask = 0x3C",
+        "kReceiveConfig = 0x44",
+        "kConfig1 = 0x52",
+    )
+    for declaration in register_offsets:
+        if declaration not in rtl_source:
+            raise SystemExit(
+                f"FAIL: RTL8139 register declaration missing: {declaration}")
+
+    for path in (ROOT / "kernel/drivers").glob("rtl8139*.hpp"):
+        text = path.read_text().lower()
+        if "irq" in text or "interrupt" in text:
+            relative = path.relative_to(ROOT)
+            raise SystemExit(f"FAIL: RTL8139 IRQ interface introduced: {relative}")
+
+    lower_source = rtl_source.lower()
+    if "irq_handler" in lower_source or "interrupt_handler" in lower_source:
+        raise SystemExit("FAIL: RTL8139 IRQ handler introduced")
+
+    required_dma_contract = (
+        "alignas(4096)\nuint8_t g_rx_buffer[8192 + 16 + 1500]",
+        "alignas(4)\nuint8_t g_tx_buffers[4][1536]",
+        "memory::kernel_virtual_to_physical",
+    )
+    for contract in required_dma_contract:
+        if contract not in rtl_source:
+            raise SystemExit(f"FAIL: RTL8139 DMA contract missing: {contract}")
+
+    for forbidden in ("kKernelRegionBase", "0xFFFFFFFF80000000"):
+        if forbidden in rtl_source:
+            raise SystemExit(
+                f"FAIL: RTL8139 driver duplicates DMA translation: {forbidden}")
+
 require("kernel/boot_info.hpp", "static_assert(sizeof(FramebufferInfo) == 28")
 require("kernel/boot_info.hpp", "static_assert(sizeof(BootInfo) == 45")
 require("kernel/boot_info.hpp", "static_assert(sizeof(E820Entry) == 24")
@@ -24,6 +85,8 @@ require("kernel/terminal/shell.cpp", "Linux95 Kernel v1.0 Storage Foundation")
 require("kernel/kernel.cpp", "[PASS] higher_half_entry")
 require("kernel/kernel.cpp", "[PASS] memory_self_test")
 require("linker.ld", ". = 0x100000;")
+
+require_rtl8139_hardware_isolation()
 
 if "Linux95 Kernel v0.1" in (ROOT / "kernel/kernel.cpp").read_text():
     raise SystemExit("FAIL: stale v0.1 kernel banner found")

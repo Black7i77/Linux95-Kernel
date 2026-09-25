@@ -60,6 +60,7 @@ KERNEL_OBJS := \
 	$(BUILD)/ps2.o \
 	$(BUILD)/mouse.o \
 	$(BUILD)/pci.o \
+	$(BUILD)/rtl8139.o \
 	$(BUILD)/memory.o \
 	$(BUILD)/virtual.o \
 	$(BUILD)/physical.o \
@@ -76,7 +77,7 @@ KERNEL_OBJS := \
 	$(BUILD)/vfs_self_test.o \
 	$(BUILD)/shell.o
 
-.PHONY: all clean run run-debug test test-qemu prepare-storage-test-image test-host-memory test-host-storage test-host-filesystem test-host-graphics test-host-pci test-host-rtl8139-helpers test-memory-source test-storage-source test-relocations check-tools
+.PHONY: all clean run run-debug test test-qemu prepare-storage-test-image test-host-memory test-host-storage test-host-filesystem test-host-graphics test-host-pci test-host-rtl8139-helpers test-host-kernel-virtual-to-physical test-memory-source test-storage-source test-relocations check-tools
 
 all: check-tools $(BUILD)/linux95-kernel.img
 
@@ -120,6 +121,7 @@ $(BUILD)/paging_bootstrap.o: kernel/arch/x86_64/paging_bootstrap.asm | $(BUILD)
 $(BUILD)/kernel.o: \
 	kernel/kernel.cpp \
 	kernel/boot_info.hpp \
+	kernel/drivers/rtl8139.hpp \
 	kernel/filesystem/vfs.hpp \
 	kernel/filesystem/vfs_self_test.hpp | $(BUILD)
 >$(CXX) $(CXXFLAGS) -c $< -o $@
@@ -178,8 +180,11 @@ $(BUILD)/mouse.o: kernel/arch/mouse.cpp kernel/arch/mouse.hpp kernel/arch/mouse_
 $(BUILD)/pci.o: kernel/pci/pci.cpp kernel/pci/pci.hpp | $(BUILD)
 >$(CXX) $(CXXFLAGS) -c $< -o $@
 
+$(BUILD)/rtl8139.o: kernel/drivers/rtl8139.cpp kernel/drivers/rtl8139.hpp kernel/drivers/rtl8139_helpers.hpp kernel/memory/memory.hpp kernel/pci/pci.hpp | $(BUILD)
+>$(CXX) $(CXXFLAGS) -c $< -o $@
 
-$(BUILD)/memory.o: kernel/memory/memory.cpp kernel/memory/memory.hpp kernel/boot_info.hpp | $(BUILD)
+
+$(BUILD)/memory.o: kernel/memory/memory.cpp kernel/memory/memory.hpp kernel/memory/address.hpp kernel/boot_info.hpp | $(BUILD)
 >$(CXX) $(CXXFLAGS) -c $< -o $@
 
 $(BUILD)/virtual.o: kernel/memory/virtual.cpp kernel/memory/virtual.hpp kernel/memory/address.hpp kernel/memory/memory.hpp kernel/arch/debug.hpp | $(BUILD)
@@ -216,6 +221,12 @@ $(BUILD)/host-rtl8139-helpers-test: tests/host/rtl8139_helpers_test.cpp kernel/d
 
 test-host-rtl8139-helpers: $(BUILD)/host-rtl8139-helpers-test
 >$(BUILD)/host-rtl8139-helpers-test
+
+$(BUILD)/host-kernel-virtual-to-physical-test: tests/host/kernel_virtual_to_physical_test.cpp kernel/memory/memory.cpp kernel/memory/memory.hpp kernel/memory/address.hpp | $(BUILD)
+>$(CXX) $(HOST_CXXFLAGS) tests/host/kernel_virtual_to_physical_test.cpp kernel/memory/memory.cpp -o $@
+
+test-host-kernel-virtual-to-physical: $(BUILD)/host-kernel-virtual-to-physical-test
+>$(BUILD)/host-kernel-virtual-to-physical-test
 
 $(BUILD)/host-ata-helpers-test: tests/host/ata_helpers_test.cpp | $(BUILD)
 >$(CXX) $(HOST_CXXFLAGS) $< -o $@
@@ -346,7 +357,7 @@ test-storage-source:
 test-filesystem-source:
 >$(PYTHON) tests/filesystem_source_checks.py
 
-test: all test-host-memory test-host-storage test-host-filesystem test-host-graphics test-host-pci test-host-rtl8139-helpers
+test: all test-host-memory test-host-storage test-host-filesystem test-host-graphics test-host-pci test-host-rtl8139-helpers test-host-kernel-virtual-to-physical
 >$(PYTHON) tests/source_checks.py
 >$(PYTHON) tests/image_checks.py
 >$(PYTHON) tests/memory_source_checks.py
