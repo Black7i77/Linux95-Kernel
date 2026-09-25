@@ -3,6 +3,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+namespace linux95::process { struct Process; }
+
 namespace linux95::user {
 
 constexpr uint8_t ELFCLASS64 = 2;
@@ -45,12 +47,31 @@ struct ElfImageInfo {
     LoadSegment segments[16];
 };
 
+struct SegmentPagePlan {
+    uint64_t first_page;
+    uint64_t page_count;
+    bool writable;
+    bool executable;
+    uint64_t file_offset;
+    uint64_t file_bytes;
+    uint64_t memory_bytes;
+};
+
 ElfStatus inspect_elf64(const uint8_t* data,
                         size_t size,
                         ElfImageInfo& out);
 
 bool segment_permissions(uint32_t elf_flags,
-                          bool& writable,
-                          bool& executable);
+                         bool& writable,
+                         bool& executable);
+
+ElfStatus build_load_plan(const uint8_t* elf,
+                          size_t size,
+                          SegmentPagePlan* out,
+                          size_t out_capacity,
+                          size_t& out_count);
+
+ElfStatus load_process_image(const char* path,
+                             linux95::process::Process& process);
 
 } // namespace linux95::user

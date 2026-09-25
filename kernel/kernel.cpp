@@ -18,6 +18,8 @@
 #include "memory/physical.hpp"
 #include "memory/self_test.hpp"
 #include "memory/virtual.hpp"
+#include "process/process.hpp"
+#include "user/elf.hpp"
 #include "net/network.hpp"
 #include "panic/panic.hpp"
 #include "pci/pci.hpp"
@@ -165,6 +167,25 @@ extern "C" [[noreturn]] void linux95_higher_half_entry(
     if (!filesystem::vfs::self_test::run()) {
         debug::write("[PANIC] vfs_self_test\n");
         panic::halt("VFS self-test failed");
+    }
+
+    process::initialize();
+    debug::write("[PASS] process subsystem initialized\n");
+
+    process::Process* pid1 = process::allocate();
+    if (pid1 != nullptr &&
+        user::load_process_image("/USER/INIT.ELF", *pid1) == user::ElfStatus::Ok) {
+        debug::write("[PASS] pid1 ELF loaded\n");
+    } else if (pid1 != nullptr) {
+        process::release(*pid1);
+    }
+
+    process::Process* pid2 = process::allocate();
+    if (pid2 != nullptr &&
+        user::load_process_image("/USER/WORKER.ELF", *pid2) == user::ElfStatus::Ok) {
+        debug::write("[PASS] pid2 ELF loaded\n");
+    } else if (pid2 != nullptr) {
+        process::release(*pid2);
     }
 
     debug::write("[PASS] pci_bus_ready\n");
