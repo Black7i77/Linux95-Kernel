@@ -76,7 +76,7 @@ KERNEL_OBJS := \
 	$(BUILD)/vfs_self_test.o \
 	$(BUILD)/shell.o
 
-.PHONY: all clean run run-debug test test-qemu prepare-storage-test-image test-host-memory test-host-storage test-host-filesystem test-host-graphics test-host-pci test-memory-source test-storage-source test-relocations check-tools
+.PHONY: all clean run run-debug test test-qemu prepare-storage-test-image test-host-memory test-host-storage test-host-filesystem test-host-graphics test-host-pci test-host-rtl8139-helpers test-memory-source test-storage-source test-relocations check-tools
 
 all: check-tools $(BUILD)/linux95-kernel.img
 
@@ -211,6 +211,12 @@ $(BUILD)/host-pci-helpers-test: tests/host/pci_helpers_test.cpp kernel/pci/pci.h
 test-host-pci: $(BUILD)/host-pci-helpers-test
 >$(BUILD)/host-pci-helpers-test
 
+$(BUILD)/host-rtl8139-helpers-test: tests/host/rtl8139_helpers_test.cpp kernel/drivers/rtl8139_helpers.hpp | $(BUILD)
+>$(CXX) $(HOST_CXXFLAGS) $< -o $@
+
+test-host-rtl8139-helpers: $(BUILD)/host-rtl8139-helpers-test
+>$(BUILD)/host-rtl8139-helpers-test
+
 $(BUILD)/host-ata-helpers-test: tests/host/ata_helpers_test.cpp | $(BUILD)
 >$(CXX) $(HOST_CXXFLAGS) $< -o $@
 
@@ -340,7 +346,7 @@ test-storage-source:
 test-filesystem-source:
 >$(PYTHON) tests/filesystem_source_checks.py
 
-test: all test-host-memory test-host-storage test-host-filesystem test-host-graphics test-host-pci
+test: all test-host-memory test-host-storage test-host-filesystem test-host-graphics test-host-pci test-host-rtl8139-helpers
 >$(PYTHON) tests/source_checks.py
 >$(PYTHON) tests/image_checks.py
 >$(PYTHON) tests/memory_source_checks.py
