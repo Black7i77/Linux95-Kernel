@@ -32,8 +32,9 @@ IdtEntry g_idt[256];
 
 extern "C" void (*isr_stub_table[])();
 extern "C" void isr_default();
+extern "C" void int80_entry();
 
-void set_gate(uint8_t vector, void (*handler)())
+void set_gate(uint8_t vector, void (*handler)(), uint8_t dpl = 0)
 {
     const uint64_t address =
         reinterpret_cast<uint64_t>(handler);
@@ -42,7 +43,7 @@ void set_gate(uint8_t vector, void (*handler)())
     entry.offset_low = static_cast<uint16_t>(address & 0xFFFFu);
     entry.selector = arch::x86_64::kKernelCodeSelector;
     entry.ist = 0;
-    entry.type_attributes = 0x8E;
+    entry.type_attributes = static_cast<uint8_t>(0x8E | (dpl << 5));
     entry.offset_mid =
         static_cast<uint16_t>((address >> 16) & 0xFFFFu);
     entry.offset_high =
@@ -63,6 +64,8 @@ void initialize()
             static_cast<uint8_t>(i),
             isr_stub_table[i]);
     }
+
+    set_gate(0x80, int80_entry, 3);
 
     const Idtr idtr{
         static_cast<uint16_t>(sizeof(g_idt) - 1),

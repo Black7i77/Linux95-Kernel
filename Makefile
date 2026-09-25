@@ -51,6 +51,7 @@ CXXFLAGS := -std=c++17 \
 KERNEL_OBJS := \
 	$(BUILD)/entry.o \
 	$(BUILD)/interrupts_asm.o \
+	$(BUILD)/int80_entry.o \
 	$(BUILD)/paging_bootstrap.o \
 	$(BUILD)/segments_asm.o \
 	$(BUILD)/kernel.o \
@@ -80,6 +81,7 @@ KERNEL_OBJS := \
 	$(BUILD)/user_space.o \
 	$(BUILD)/elf.o \
 	$(BUILD)/process.o \
+	$(BUILD)/syscall.o \
 	$(BUILD)/segments.o \
 	$(BUILD)/tss.o \
 	$(BUILD)/self_test.o \
@@ -97,7 +99,7 @@ KERNEL_OBJS := \
 NETWORK_TEST_OBJS := $(subst $(BUILD)/kernel.o,$(BUILD)/kernel-network-test.o,$(KERNEL_OBJS))
 NETWORK_TEST_IMAGE := $(BUILD)/linux95-kernel-network-test.img
 
-.PHONY: all clean run run-debug test test-qemu prepare-storage-test-image test-host-segments test-host-process test-host-scheduler test-host-user-space test-host-elf test-host-elf-loader-plan test-host-memory test-host-storage test-host-filesystem test-host-graphics test-host-pci test-host-rtl8139-helpers test-host-kernel-virtual-to-physical test-host-ethernet test-host-arp test-host-ipv4 test-host-icmp test-memory-source test-storage-source test-relocations check-tools
+.PHONY: all clean run run-debug test test-qemu prepare-storage-test-image test-host-segments test-host-process test-host-scheduler test-host-user-space test-host-elf test-host-elf-loader-plan test-host-syscall test-host-memory test-host-storage test-host-filesystem test-host-graphics test-host-pci test-host-rtl8139-helpers test-host-kernel-virtual-to-physical test-host-ethernet test-host-arp test-host-ipv4 test-host-icmp test-memory-source test-storage-source test-relocations check-tools
 
 all: check-tools $(BUILD)/linux95-kernel.img $(BUILD)/user/init.elf $(BUILD)/user/worker.elf
 
@@ -129,6 +131,9 @@ $(BUILD)/user/init.elf: $(BUILD)/user/start.o $(BUILD)/user/init.o user/user.ld
 
 $(BUILD)/user/worker.elf: $(BUILD)/user/start.o $(BUILD)/user/worker.o user/user.ld
 >$(LD) -nostdlib -static -no-pie -z max-page-size=0x1000 -T user/user.ld -o $@ $(BUILD)/user/start.o $(BUILD)/user/worker.o
+
+$(BUILD)/int80_entry.o: kernel/syscall/int80_entry.asm | $(BUILD)
+>$(NASM) -f elf64 $< -o $@
 
 $(BUILD)/stage1.bin: boot/stage1.asm | $(BUILD)
 >$(NASM) -f bin $< -o $@
@@ -273,6 +278,9 @@ $(BUILD)/elf.o: kernel/user/elf.cpp kernel/user/elf.hpp kernel/memory/address.hp
 $(BUILD)/process.o: kernel/process/process.cpp kernel/process/process.hpp kernel/process/context.hpp | $(BUILD)
 >$(CXX) $(CXXFLAGS) -c $< -o $@
 
+$(BUILD)/syscall.o: kernel/syscall/syscall.cpp kernel/syscall/syscall.hpp kernel/process/process.hpp kernel/memory/user_space.hpp | $(BUILD)
+>$(CXX) $(CXXFLAGS) -c $< -o $@
+
 $(BUILD)/segments.o: kernel/arch/x86_64/segments.cpp kernel/arch/x86_64/segments.hpp kernel/arch/x86_64/tss.hpp | $(BUILD)
 >$(CXX) $(CXXFLAGS) -c $< -o $@
 
@@ -321,6 +329,12 @@ $(BUILD)/host-elf-loader-plan-test: tests/host/elf_loader_plan_test.cpp kernel/u
 
 test-host-elf-loader-plan: $(BUILD)/host-elf-loader-plan-test
 >$(BUILD)/host-elf-loader-plan-test
+
+$(BUILD)/host-syscall-test: tests/host/syscall_test.cpp kernel/syscall/syscall.cpp kernel/syscall/syscall.hpp kernel/memory/user_space.hpp | $(BUILD)
+>$(CXX) $(HOST_CXXFLAGS) -ffunction-sections -fdata-sections tests/host/syscall_test.cpp kernel/syscall/syscall.cpp -Wl,--gc-sections -o $@
+
+test-host-syscall: $(BUILD)/host-syscall-test
+>$(BUILD)/host-syscall-test
 
 $(BUILD)/host-page-bitmap-test: tests/host/page_bitmap_test.cpp kernel/memory/page_bitmap.hpp kernel/memory/address.hpp | $(BUILD)
 >$(CXX) $(HOST_CXXFLAGS) $< -o $@
@@ -533,7 +547,7 @@ test-storage-source:
 test-filesystem-source:
 >$(PYTHON) tests/filesystem_source_checks.py
 
-test: all test-host-memory test-host-storage test-host-segments test-host-process test-host-scheduler test-host-user-space test-host-elf test-host-elf-loader-plan test-host-filesystem test-host-graphics test-host-pci test-host-rtl8139-helpers test-host-kernel-virtual-to-physical test-host-ethernet test-host-arp test-host-ipv4 test-host-icmp
+test: all test-host-memory test-host-storage test-host-segments test-host-process test-host-scheduler test-host-user-space test-host-elf test-host-elf-loader-plan test-host-syscall test-host-filesystem test-host-graphics test-host-pci test-host-rtl8139-helpers test-host-kernel-virtual-to-physical test-host-ethernet test-host-arp test-host-ipv4 test-host-icmp
 >$(PYTHON) tests/source_checks.py
 >$(PYTHON) tests/image_checks.py
 >$(PYTHON) tests/memory_source_checks.py
