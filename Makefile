@@ -103,7 +103,7 @@ KERNEL_OBJS := \
 NETWORK_TEST_OBJS := $(subst $(BUILD)/kernel.o,$(BUILD)/kernel-network-test.o,$(KERNEL_OBJS))
 NETWORK_TEST_IMAGE := $(BUILD)/linux95-kernel-network-test.img
 
-.PHONY: all clean run run-debug test test-qemu prepare-storage-test-image test-host-segments test-host-process test-host-scheduler test-host-user-space test-host-elf test-host-elf-loader-plan test-host-syscall test-host-memory test-host-storage test-host-filesystem test-host-graphics test-host-pci test-host-rtl8139-helpers test-host-kernel-virtual-to-physical test-host-ethernet test-host-arp test-host-ipv4 test-host-icmp test-memory-source test-storage-source test-relocations check-tools
+.PHONY: all clean run run-debug test test-qemu prepare-storage-test-image test-host-segments test-host-process test-host-scheduler test-host-user-space test-host-elf test-host-elf-loader-plan test-host-syscall test-host-memory test-host-storage test-host-filesystem test-host-graphics test-host-pci test-host-rtl8139-helpers test-host-kernel-virtual-to-physical test-host-ethernet test-host-arp test-host-ipv4 test-host-icmp test-host-heap test-memory-source test-storage-source test-relocations check-tools
 
 all: check-tools $(BUILD)/linux95-kernel.img $(BUILD)/user/init.elf $(BUILD)/user/worker.elf
 
@@ -349,8 +349,8 @@ $(BUILD)/host-elf-loader-plan-test: tests/host/elf_loader_plan_test.cpp kernel/u
 test-host-elf-loader-plan: $(BUILD)/host-elf-loader-plan-test
 >$(BUILD)/host-elf-loader-plan-test
 
-$(BUILD)/host-syscall-test: tests/host/syscall_test.cpp kernel/syscall/syscall.cpp kernel/syscall/syscall.hpp kernel/memory/user_space.hpp | $(BUILD)
->$(CXX) $(HOST_CXXFLAGS) -ffunction-sections -fdata-sections tests/host/syscall_test.cpp kernel/syscall/syscall.cpp -Wl,--gc-sections -o $@
+$(BUILD)/host-syscall-test: tests/host/syscall_test.cpp kernel/syscall/syscall.cpp kernel/syscall/syscall.hpp kernel/memory/user_space.cpp kernel/memory/user_space.hpp | $(BUILD)
+>$(CXX) $(HOST_CXXFLAGS) -ffunction-sections -fdata-sections tests/host/syscall_test.cpp kernel/syscall/syscall.cpp kernel/memory/user_space.cpp -Wl,--gc-sections -o $@
 
 test-host-syscall: $(BUILD)/host-syscall-test
 >$(BUILD)/host-syscall-test
@@ -361,6 +361,12 @@ $(BUILD)/host-page-bitmap-test: tests/host/page_bitmap_test.cpp kernel/memory/pa
 test-host-memory: $(BUILD)/host-page-bitmap-test $(BUILD)/host-e820-limit-test
 >$(BUILD)/host-page-bitmap-test
 >$(BUILD)/host-e820-limit-test
+
+$(BUILD)/host-heap-test: tests/host/heap_test.cpp kernel/memory/heap.cpp kernel/memory/heap.hpp | $(BUILD)
+>$(CXX) $(HOST_CXXFLAGS) tests/host/heap_test.cpp kernel/memory/heap.cpp -o $@
+
+test-host-heap: $(BUILD)/host-heap-test
+>$(BUILD)/host-heap-test
 
 $(BUILD)/host-pci-helpers-test: tests/host/pci_helpers_test.cpp kernel/pci/pci.hpp | $(BUILD)
 >$(CXX) $(HOST_CXXFLAGS) $< -o $@
@@ -545,17 +551,16 @@ $(NETWORK_TEST_IMAGE): \
 >dd if=$(BUILD)/stage2.bin of=$@ bs=$(SECTOR) seek=1 conv=notrunc status=none
 >dd if=$(BUILD)/kernel-network-test.bin of=$@ bs=$(SECTOR) seek=$(KERNEL_LBA) conv=notrunc status=none
 
-$(STORAGE_TEST_IMAGE): | $(BUILD)
+$(STORAGE_TEST_IMAGE): tests/prepare_fat32_image.py $(BUILD)/user/init.elf $(BUILD)/user/worker.elf | $(BUILD)
+>@for tool in mkfs.fat mmd mcopy; do \
+	command -v $$tool >/dev/null || { echo "Missing tool: $$tool"; exit 1; }; \
+done
 >$(PYTHON) tests/prepare_fat32_image.py $@
 
 $(FAULT_TEST_IMAGE): tests/prepare_fat32_image.py $(BUILD)/user/fault.elf $(BUILD)/user/worker.elf | $(BUILD)
 >$(PYTHON) tests/prepare_fat32_image.py $@ --process-fault
 
-prepare-storage-test-image: | $(BUILD)
->@for tool in mkfs.fat mmd mcopy; do \
-	command -v $$tool >/dev/null || { echo "Missing tool: $$tool"; exit 1; }; \
-done
->$(PYTHON) tests/prepare_fat32_image.py $(STORAGE_TEST_IMAGE)
+prepare-storage-test-image: $(STORAGE_TEST_IMAGE)
 
 test-memory-source:
 >$(PYTHON) tests/memory_source_checks.py
@@ -569,7 +574,7 @@ test-storage-source:
 test-filesystem-source:
 >$(PYTHON) tests/filesystem_source_checks.py
 
-test: all test-host-memory test-host-storage test-host-segments test-host-process test-host-scheduler test-host-user-space test-host-elf test-host-elf-loader-plan test-host-syscall test-host-filesystem test-host-graphics test-host-pci test-host-rtl8139-helpers test-host-kernel-virtual-to-physical test-host-ethernet test-host-arp test-host-ipv4 test-host-icmp
+test: all test-host-memory test-host-storage test-host-heap test-host-segments test-host-process test-host-scheduler test-host-user-space test-host-elf test-host-elf-loader-plan test-host-syscall test-host-filesystem test-host-graphics test-host-pci test-host-rtl8139-helpers test-host-kernel-virtual-to-physical test-host-ethernet test-host-arp test-host-ipv4 test-host-icmp
 >$(PYTHON) tests/source_checks.py
 >$(PYTHON) tests/image_checks.py
 >$(PYTHON) tests/memory_source_checks.py

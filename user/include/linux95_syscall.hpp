@@ -24,13 +24,13 @@ inline long syscall_call(long number, long a1 = 0, long a2 = 0, long a3 = 0)
 
 inline long write_int80(const char* data, unsigned long length)
 {
-    return int80_call(0, reinterpret_cast<long>(data),
+    return int80_call(0, 1, reinterpret_cast<long>(data),
                       static_cast<long>(length));
 }
 
 inline long write_syscall(const char* data, unsigned long length)
 {
-    return syscall_call(0, reinterpret_cast<long>(data),
+    return syscall_call(0, 1, reinterpret_cast<long>(data),
                         static_cast<long>(length));
 }
 

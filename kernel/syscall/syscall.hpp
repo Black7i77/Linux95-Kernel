@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stddef.h>
 #include <stdint.h>
 
 #include "process/process.hpp"
@@ -46,6 +47,19 @@ Result dispatch(process::Process& process, Frame& frame);
 Result dispatch_for_test(process::Process& process, Frame& frame);
 void initialize_fast_path();
 bool valid_sysret_target(uint64_t rip, uint64_t rsp);
+bool valid_sysret_context(const process::UserContext& context);
+uint64_t sanitize_user_rflags(uint64_t flags);
+
+static_assert(offsetof(Frame, r15) == 0);
+static_assert(offsetof(Frame, rax) == 112);
+static_assert(offsetof(Frame, rip) == 120);
+static_assert(offsetof(Frame, cs) == 128);
+static_assert(offsetof(Frame, rflags) == 136);
+static_assert(offsetof(Frame, rsp) == 144);
+static_assert(sizeof(Frame) == 160);
+static_assert(offsetof(CpuLocalState, current_process) == 0);
+static_assert(offsetof(CpuLocalState, kernel_stack_top) == 8);
+static_assert(offsetof(CpuLocalState, saved_user_rsp) == 16);
 constexpr uint64_t encode_star_for_test(uint16_t kernel_code,
                                         uint16_t kernel_data,
                                         uint16_t user_code,

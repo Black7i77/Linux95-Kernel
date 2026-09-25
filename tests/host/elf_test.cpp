@@ -98,6 +98,13 @@ int main() {
     assert(inspect_elf64(file_overflow.data(), file_overflow.size(), info) ==
            ElfStatus::RangeOverflow);
 
+    auto virtual_overflow = valid;
+    put64(virtual_overflow, kProgramHeaderOffset + 16, UINT64_MAX - 8);
+    put64(virtual_overflow, kProgramHeaderOffset + 32, 0);
+    put64(virtual_overflow, kProgramHeaderOffset + 40, 32);
+    assert(inspect_elf64(virtual_overflow.data(), virtual_overflow.size(), info) ==
+           ElfStatus::RangeOverflow);
+
     auto overlapping = fixture(2);
     assert(inspect_elf64(overlapping.data(), overlapping.size(), info) ==
            ElfStatus::OverlappingSegments);
@@ -126,6 +133,11 @@ int main() {
     put32(interp, kProgramHeaderOffset, 3);
     assert(inspect_elf64(interp.data(), interp.size(), info) ==
            ElfStatus::InterpreterNotSupported);
+
+    auto dynamic_segment = fixture(2);
+    put32(dynamic_segment, kProgramHeaderOffset + kProgramHeaderSize, 2);
+    assert(inspect_elf64(dynamic_segment.data(), dynamic_segment.size(), info) ==
+           ElfStatus::Unsupported);
 
     auto outside = valid;
     put64(outside, kProgramHeaderOffset + 16, kImageBase - 0x1000);

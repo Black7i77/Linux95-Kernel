@@ -91,7 +91,9 @@ available.
 
 This is not a general-purpose process environment. It has no preemption,
 `fork`/`clone`, threads, dynamic linking, shared libraries, or full POSIX
-compatibility.
+compatibility. Floating-point and SIMD state is not saved between processes;
+userspace attempts to use x87/MMX/SSE/AVX instructions are disabled and treated
+as a fatal user-process fault.
 
 ## Shell commands
 

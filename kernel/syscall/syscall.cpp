@@ -1,6 +1,7 @@
 #include "syscall/syscall.hpp"
 
 #include "arch/debug.hpp"
+#include "arch/x86_64/control_regs.hpp"
 #include "arch/x86_64/msr.hpp"
 #include "arch/x86_64/segments.hpp"
 #include "memory/user_space.hpp"
@@ -24,14 +25,15 @@ constexpr int64_t kNotImplemented = -38;
 constexpr uint64_t kMaxWriteLength = 4096;
 uint8_t g_write_buffer[kMaxWriteLength];
 
-Result number_action(process::Process& process, Frame& frame)
+Result dispatch_control(process::Process& process, Frame& frame)
 {
     const Number number = static_cast<Number>(frame.rax);
     if (number == Number::Yield) {
         return {0, Action::YieldToHost};
     }
     if (number == Number::Exit) {
-        process::mark_exited(process, static_cast<int64_t>(frame.rdi));
+        process.exit_code = static_cast<int64_t>(frame.rdi);
+        process.state = process::State::Exited;
         return {0, Action::ExitToHost};
     }
     return {kNotImplemented, Action::ReturnToUser};
@@ -133,8 +135,21 @@ bool valid_sysret_target(uint64_t rip, uint64_t rsp)
     return rip < kUserLimit && rsp < kUserLimit;
 }
 
+bool valid_sysret_context(const process::UserContext& context)
+{
+    return valid_sysret_target(context.rip, context.rsp);
+}
+
+uint64_t sanitize_user_rflags(uint64_t flags)
+{
+    constexpr uint64_t kUserFlags = 0x002008D5ULL;
+    constexpr uint64_t kRequiredFlags = 0x202ULL;
+    return (flags & kUserFlags) | kRequiredFlags;
+}
+
 void initialize_fast_path()
 {
+    arch::x86_64::disable_user_fp_state();
     g_cpu_local_state.current_process = nullptr;
     g_cpu_local_state.kernel_stack_top = 0;
     g_cpu_local_state.saved_user_rsp = 0;
@@ -166,20 +181,15 @@ Result dispatch(process::Process& process, Frame& frame)
     if (frame.rax == static_cast<uint64_t>(Number::Write)) {
         return safe_write(process, frame);
     }
-    return number_action(process, frame);
+    return dispatch_control(process, frame);
 }
 
 Result dispatch_for_test(process::Process& process, Frame& frame)
 {
-    if (frame.rax == static_cast<uint64_t>(Number::Yield)) {
-        return {0, Action::YieldToHost};
+    if (frame.rax == static_cast<uint64_t>(Number::Write)) {
+        return {kNotImplemented, Action::ReturnToUser};
     }
-    if (frame.rax == static_cast<uint64_t>(Number::Exit)) {
-        process.exit_code = static_cast<int64_t>(frame.rdi);
-        process.state = process::State::Exited;
-        return {0, Action::ExitToHost};
-    }
-    return {kNotImplemented, Action::ReturnToUser};
+    return dispatch_control(process, frame);
 }
 
 } // namespace linux95::syscall
@@ -196,6 +206,7 @@ extern "C" uint64_t int80_bridge(linux95::syscall::Frame* frame)
         linux95::debug::write("[PASS] entered ring3\n");
         linux95::debug::write("[PASS] int80 syscall path\n");
     }
+    frame->rflags = linux95::syscall::sanitize_user_rflags(frame->rflags);
     const linux95::syscall::Result result =
         linux95::syscall::dispatch(*process, *frame);
     frame->rax = static_cast<uint64_t>(result.value);
@@ -228,6 +239,7 @@ extern "C" uint64_t syscall_bridge(linux95::syscall::Frame* frame)
         linux95::syscall::g_cpu_local_state.current_process == nullptr) {
         return 0;
     }
+    frame->rflags = linux95::syscall::sanitize_user_rflags(frame->r11);
     const linux95::syscall::Result result = linux95::syscall::dispatch(
         *linux95::syscall::g_cpu_local_state.current_process, *frame);
     static bool ring3_syscall_seen = false;
@@ -244,6 +256,14 @@ extern "C" uint64_t syscall_bridge(linux95::syscall::Frame* frame)
             *frame,
             linux95::process::ReturnKind::Sysret);
         if (result.action == linux95::syscall::Action::YieldToHost) {
+            if (!linux95::syscall::valid_sysret_context(process.context)) {
+                linux95::process::mark_exited(process, -14);
+                linux95::syscall::restore_host_gs_after_syscall();
+                linux95::scheduler::return_to_host(
+                    process,
+                    process.context,
+                    linux95::scheduler::HostReason::Fault);
+            }
             process.state = linux95::process::State::Ready;
             linux95::syscall::restore_host_gs_after_syscall();
             linux95::scheduler::return_to_host(
@@ -263,16 +283,12 @@ extern "C" uint64_t syscall_bridge(linux95::syscall::Frame* frame)
     if (!linux95::syscall::valid_sysret_target(
             frame->rcx,
             linux95::syscall::g_cpu_local_state.saved_user_rsp)) {
-        process.state = linux95::process::State::Exited;
+        linux95::process::mark_exited(process, -14);
         linux95::syscall::restore_host_gs_after_syscall();
         linux95::scheduler::return_to_host(
             process,
             process.context,
             linux95::scheduler::HostReason::Fault);
     }
-    frame->rflags = (frame->r11 | 0x2ULL) &
-                    ~(linux95::syscall::kFlagTrap |
-                      linux95::syscall::kFlagInterrupt |
-                      linux95::syscall::kFlagDirection);
     return 1;
 }

@@ -72,8 +72,8 @@ process_resume_user:
     mov rdi, [rax + 72]
     mov rcx, [rax + 120]
     mov r11, [rax + 136]
-    or r11, 2
-    and r11, ~(1 << 8 | 1 << 9 | 1 << 10)
+    or r11, 0x202
+    and r11, ~(1 << 8 | 1 << 10 | 3 << 12 | 1 << 14 | 1 << 16 | 1 << 17 | 1 << 18 | 3 << 19)
     mov rsp, [rax + 128]
     mov rax, [rax + 112]
     o64 sysret

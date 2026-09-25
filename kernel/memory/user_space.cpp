@@ -67,11 +67,6 @@ void release_table(uint64_t physical, int level)
     physical::free_page(physical);
 }
 
-bool access_allowed(const PageInfo& page, UserAccess access)
-{
-    return user_page_access_allowed(page, access);
-}
-
 } // namespace
 
 bool create_user_address_space(UserAddressSpace& address_space)
@@ -160,21 +155,47 @@ bool query_page(uint64_t root_physical, uint64_t virtual_address, PageInfo& out)
     return paging::query_page(root_physical, virtual_address, out);
 }
 
+namespace {
+
+bool lookup_root_page(void* context,
+                      uint64_t virtual_address,
+                      PageInfo& out)
+{
+    const uint64_t root_physical = *static_cast<uint64_t*>(context);
+    return query_page(root_physical, virtual_address, out);
+}
+
+} // namespace
+
+bool validate_user_range_with_lookup(uint64_t address,
+                                     size_t length,
+                                     UserAccess access,
+                                     PageLookup lookup,
+                                     void* context)
+{
+    if (lookup == nullptr || !user_range_arithmetic_valid(address, length)) {
+        return false;
+    }
+    if (length == 0) return true;
+    const UserPageSpan span = user_page_span(address, length);
+    for (uint64_t page = span.first_page;; page += kPageSize) {
+        PageInfo info{};
+        if (!lookup(context, page, info) ||
+            !user_page_access_allowed(info, access)) {
+            return false;
+        }
+        if (page == span.last_page) break;
+    }
+    return true;
+}
+
 bool validate_user_range(uint64_t root_physical,
                          uint64_t address,
                          size_t length,
                          UserAccess access)
 {
-    if (!user_range_arithmetic_valid(address, length)) return false;
-    if (length == 0) return true;
-    const UserPageSpan span = user_page_span(address, length);
-    for (uint64_t page = span.first_page;; page += kPageSize) {
-        PageInfo info{};
-        if (!query_page(root_physical, page, info) ||
-            !access_allowed(info, access)) return false;
-        if (page == span.last_page) break;
-    }
-    return true;
+    return validate_user_range_with_lookup(
+        address, length, access, lookup_root_page, &root_physical);
 }
 
 bool copy_from_user(uint64_t root_physical,

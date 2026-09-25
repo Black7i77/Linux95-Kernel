@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 
 namespace linux95::process {
@@ -30,6 +31,14 @@ struct HostContext {
     uint64_t r14;
     uint64_t r15;
 };
+
+static_assert(offsetof(UserContext, rip) == 120);
+static_assert(offsetof(UserContext, rsp) == 128);
+static_assert(offsetof(UserContext, rflags) == 136);
+static_assert(offsetof(UserContext, cs) == 144);
+static_assert(offsetof(UserContext, ss) == 146);
+static_assert(offsetof(UserContext, return_kind) == 148);
+static_assert(sizeof(UserContext) == 152);
 
 extern "C" int process_save_host(HostContext* context);
 extern "C" [[noreturn]] void process_restore_host(const HostContext* context);

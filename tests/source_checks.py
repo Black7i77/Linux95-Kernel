@@ -117,6 +117,8 @@ require("kernel/process/scheduler.cpp", "write_cr3(selected.page_table_physical)
 require("kernel/process/scheduler.cpp", "set_tss_rsp0(selected.kernel_stack_top)")
 require("kernel/process/scheduler.cpp", "set_cpu_process")
 require("kernel/process/scheduler.cpp", "process_restore_host")
+require("kernel/process/scheduler.cpp", "asm volatile(\"cli\"")
+require("kernel/process/scheduler.cpp", "valid_sysret_context")
 require("kernel/gui/desktop.cpp", "scheduler::run_once()")
 require("kernel/syscall/syscall.cpp", "capture_context")
 require("kernel/syscall/syscall.cpp", "frame->cs & 3U")
@@ -130,6 +132,10 @@ require("kernel/syscall/syscall.cpp", "kIa32Star")
 require("kernel/syscall/syscall.cpp", "kIa32Lstar")
 require("kernel/syscall/syscall.cpp", "kIa32Fmask")
 require("kernel/syscall/syscall.cpp", "frame->rflags")
+require("kernel/syscall/syscall.cpp", "sanitize_user_rflags")
+require("kernel/syscall/syscall.cpp", "sanitize_user_rflags(frame->rflags)")
+require("kernel/syscall/syscall.cpp", "valid_sysret_context")
+require("kernel/syscall/syscall.cpp", "dispatch_control")
 require("kernel/arch/x86_64/msr.hpp", "rdmsr")
 require("kernel/arch/x86_64/msr.hpp", "wrmsr")
 syscall_entry_source = (ROOT / "kernel/syscall/syscall_entry.asm").read_text()
@@ -146,6 +152,43 @@ if not (0 <= entry_swapgs < entry_save_rsp < entry_load_stack < entry_call):
 context_source = (ROOT / "kernel/process/context.asm").read_text()
 if "process_resume_user" not in context_source or "iretq" not in context_source:
     raise SystemExit("FAIL: Ring 3 IRET resume path missing")
+if "1 << 8 | 1 << 10 | 3 << 12" not in context_source or "or r11, 0x202" not in context_source:
+    raise SystemExit("FAIL: SYSRET resume does not preserve safe user IF")
+interrupts_source = (ROOT / "kernel/arch/interrupts.cpp").read_text()
+if not all(token in interrupts_source for token in (
+        "set_gate(2, isr_stub_table[2], 0, 1)",
+        "set_gate(8, isr_stub_table[8], 0, 2)",
+        "set_gate(18, isr_stub_table[18], 0, 3)")):
+    raise SystemExit("FAIL: non-maskable/fatal entries lack dedicated IST stacks")
+resume_call = (ROOT / "kernel/process/scheduler.cpp").read_text()
+if not (resume_call.find('asm volatile("cli"') <
+        resume_call.find("process::process_resume_user")):
+    raise SystemExit("FAIL: interrupts are not disabled before Ring 3 transition")
+syscall_source = (ROOT / "kernel/syscall/syscall.cpp").read_text()
+bridge_source = syscall_source[syscall_source.index("extern \"C\" uint64_t syscall_bridge"):]
+yield_branch = bridge_source.find("result.action == linux95::syscall::Action::YieldToHost")
+yield_validation = bridge_source.find("valid_sysret_context(process.context)")
+host_return = bridge_source.find("scheduler::return_to_host(", yield_validation)
+if not (0 <= yield_branch < yield_validation < host_return):
+    raise SystemExit("FAIL: yielded SYSRET context is not validated before host return")
+user_wrapper_source = (ROOT / "user/include/linux95_syscall.hpp").read_text()
+if "write_syscall" in user_wrapper_source and not all(value in user_wrapper_source for value in (
+        "syscall_call(0, 1, reinterpret_cast<long>(data)",
+        "int80_call(0, 1, reinterpret_cast<long>(data)")):
+    raise SystemExit("FAIL: write wrappers do not pass fd, buffer, length")
+require("kernel/user/elf.cpp", "PT_DYNAMIC")
+require("kernel/user/elf.cpp", "ElfStatus::Unsupported")
+require("kernel/user/elf.cpp", "heap::rewind")
+require("kernel/arch/x86_64/control_regs.hpp", "disable_user_fp_state")
+require("kernel/syscall/syscall.cpp", "disable_user_fp_state")
+require("kernel/arch/x86_64/tss.cpp", "g_tss.ist1")
+require("kernel/arch/x86_64/tss.cpp", "g_tss.ist2")
+require("kernel/arch/x86_64/tss.cpp", "g_tss.ist3")
+makefile_source = (ROOT / "Makefile").read_text()
+if "$(STORAGE_TEST_IMAGE): tests/prepare_fat32_image.py $(BUILD)/user/init.elf $(BUILD)/user/worker.elf" not in makefile_source:
+    raise SystemExit("FAIL: storage fixture lacks user ELF build prerequisites")
+if "prepare-storage-test-image: $(STORAGE_TEST_IMAGE)" not in makefile_source:
+    raise SystemExit("FAIL: storage fixture target is not dependency-ordered")
 if "reinterpret_cast<const char*>(frame.rsi)" in (
         ROOT / "kernel/syscall/syscall.cpp").read_text():
     raise SystemExit("FAIL: raw userspace pointer dereference in syscall write")

@@ -28,6 +28,10 @@ struct UserPageSpan {
     uint64_t last_page;
 };
 
+using PageLookup = bool (*)(void* context,
+                            uint64_t virtual_address,
+                            PageInfo& out);
+
 constexpr bool make_user_page_flags(bool writable,
                                     bool executable,
                                     bool nxe_enabled,
@@ -108,6 +112,11 @@ bool validate_user_range(uint64_t root_physical,
                          uint64_t address,
                          size_t length,
                          UserAccess access);
+bool validate_user_range_with_lookup(uint64_t address,
+                                     size_t length,
+                                     UserAccess access,
+                                     PageLookup lookup,
+                                     void* context);
 bool copy_from_user(uint64_t root_physical,
                     void* destination,
                     uint64_t source_user,

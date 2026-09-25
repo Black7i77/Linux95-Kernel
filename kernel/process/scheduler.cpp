@@ -64,9 +64,18 @@ bool run_once()
 
     process::Process& selected = table[slot];
     g_previous_slot = slot;
+    if (selected.context.return_kind == process::ReturnKind::Sysret &&
+        !syscall::valid_sysret_context(selected.context)) {
+        process::mark_exited(selected, -14);
+        process::reap_exited();
+        return true;
+    }
     selected.state = process::State::Running;
     g_host_cr3 = arch::x86_64::read_cr3();
     g_host_rflags = read_rflags();
+    asm volatile("cli" ::: "memory");
+    selected.context.rflags = syscall::sanitize_user_rflags(
+        selected.context.rflags);
 
     if (process::process_save_host(&g_host_context) == 0) {
         arch::x86_64::write_cr3(selected.page_table_physical);

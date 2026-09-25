@@ -396,6 +396,8 @@ print("[PASS] x86_64 kernel entered kernel_main")
 print("[PASS] kernel initialization reached graphical desktop")
 if WITHOUT_NETWORK or PROCESS_SELF_TEST or PROCESS_FAULT_TEST:
     print("[PASS] missing RTL8139 remained non-fatal")
+elif WITHOUT_USER_PROGRAMS:
+    print("[PASS] RTL8139 network stack initialized")
 else:
     print("[PASS] RTL8139 network stack initialized")
     print("[PASS] ARP gateway resolved at 10.0.2.2")

@@ -15,6 +15,7 @@ constexpr size_t kElfHeaderSize = 64;
 constexpr size_t kProgramHeaderSize = 56;
 constexpr size_t kMaxSegments = 16;
 constexpr size_t kKernelStackPages = 1;
+constexpr uint32_t PT_DYNAMIC = 2;
 
 struct [[gnu::packed]] Elf64Header {
     uint8_t ident[16];
@@ -193,9 +194,11 @@ ElfStatus load_process_image(const char* path,
         return ElfStatus::InvalidSegment;
     }
 
+    const heap::Checkpoint scratch_checkpoint = heap::checkpoint();
     const auto fail = [&](ElfStatus result) {
         clear_process(process);
         process.state = linux95::process::State::Unused;
+        heap::rewind(scratch_checkpoint);
         return result;
     };
     process.state = linux95::process::State::Created;
@@ -357,6 +360,7 @@ ElfStatus load_process_image(const char* path,
     process.context.ss = arch::x86_64::kUserDataSelector;
     process.context.return_kind = linux95::process::ReturnKind::Iret;
     process.state = linux95::process::State::Ready;
+    heap::rewind(scratch_checkpoint);
     return ElfStatus::Ok;
 
 cleanup:
@@ -367,6 +371,7 @@ cleanup:
     memory::destroy_user_address_space(address_space);
     clear_process(process);
     process.state = linux95::process::State::Unused;
+    heap::rewind(scratch_checkpoint);
     return failure_status(status);
 }
 
@@ -434,6 +439,9 @@ ElfStatus inspect_elf64(const uint8_t* data,
         }
         if (program_header.type == PT_INTERP) {
             return ElfStatus::InterpreterNotSupported;
+        }
+        if (program_header.type == PT_DYNAMIC) {
+            return ElfStatus::Unsupported;
         }
         if (program_header.type != PT_LOAD) continue;
         if (load_count == kMaxSegments) return ElfStatus::InvalidSegment;
