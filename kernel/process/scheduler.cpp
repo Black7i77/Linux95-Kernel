@@ -3,6 +3,8 @@
 #include "arch/x86_64/control_regs.hpp"
 #include "arch/x86_64/tss.hpp"
 #include "arch/debug.hpp"
+#include "arch/interrupts.hpp"
+#include "memory/address.hpp"
 #include "syscall/syscall.hpp"
 
 namespace linux95::scheduler {
@@ -16,6 +18,7 @@ int g_previous_slot = -1;
 uint32_t g_last_yielded_pid = 0;
 size_t g_reaped_process_count = 0;
 bool g_desktop_survival_emitted = false;
+HostReason g_last_host_reason = HostReason::Yield;
 
 uint64_t read_rflags()
 {
@@ -76,6 +79,14 @@ bool run_once()
 
     write_rflags(g_host_rflags);
 
+    if (g_last_host_reason == HostReason::Fault) {
+        static bool fault_survival_emitted = false;
+        if (!fault_survival_emitted) {
+            fault_survival_emitted = true;
+            debug::write("[PASS] kernel survived user fault\n");
+        }
+    }
+
     if (selected.state == process::State::Exited) {
         process::reap_exited();
         ++g_reaped_process_count;
@@ -100,6 +111,7 @@ bool run_once()
     HostReason reason)
 {
     (void) context;
+    g_last_host_reason = reason;
     if (reason == HostReason::Yield &&
         process.state == process::State::Ready) {
         if (g_last_yielded_pid != 0 &&
@@ -115,6 +127,124 @@ bool run_once()
     arch::x86_64::write_cr3(g_host_cr3);
     syscall::set_cpu_process(nullptr, 0);
     process::process_restore_host(&g_host_context);
+}
+
+} // namespace linux95::scheduler
+
+namespace linux95::process {
+namespace {
+
+void debug_write_hex(uint64_t value)
+{
+    static constexpr char kHex[] = "0123456789abcdef";
+    debug::write("0x");
+    bool started = false;
+    for (int shift = 60; shift >= 0; shift -= 4) {
+        const uint8_t digit = static_cast<uint8_t>((value >> shift) & 0xF);
+        if (digit != 0 || started || shift == 0) {
+            debug::put_char(kHex[digit]);
+            started = true;
+        }
+    }
+}
+
+void debug_write_decimal(uint32_t value)
+{
+    char digits[10];
+    size_t count = 0;
+    do {
+        digits[count++] = static_cast<char>('0' + value % 10);
+        value /= 10;
+    } while (value != 0);
+    while (count != 0) {
+        debug::put_char(digits[--count]);
+    }
+}
+
+}
+
+bool handle_user_fault(uint8_t vector,
+                       uint64_t error_code,
+                       const interrupts::InterruptFrame& frame)
+{
+    if ((frame.cs & 0x3U) != 0x3U || vector == 2 || vector == 8 ||
+        vector == 18) {
+        return false;
+    }
+
+    Process* current = syscall::cpu_local_state().current_process;
+    uintptr_t current_address = reinterpret_cast<uintptr_t>(current);
+    uintptr_t table_begin = reinterpret_cast<uintptr_t>(table());
+    const uintptr_t kernel_region_base =
+        static_cast<uintptr_t>(memory::kKernelRegionBase);
+    if (current_address >= kernel_region_base) {
+        current_address -= kernel_region_base;
+    }
+    if (table_begin >= kernel_region_base) {
+        table_begin -= kernel_region_base;
+    }
+    const uintptr_t table_bytes = capacity() * sizeof(Process);
+    if (current == nullptr || current_address < table_begin ||
+        current_address >= table_begin + table_bytes ||
+        (current_address - table_begin) % sizeof(Process) != 0) {
+        debug::write("[FAULT] CPL3 exception without a tracked process\n");
+        return false;
+    }
+    if (current->pid == 0 || current->state != State::Running ||
+        current->page_table_physical == 0 ||
+        current->kernel_stack_top == 0) {
+        debug::write("[FAULT] CPL3 exception without a running process\n");
+        return false;
+    }
+
+    uint64_t fault_address = 0;
+    if (vector == 14) {
+        asm volatile("mov %%cr2, %0" : "=r"(fault_address));
+    }
+
+    current->fault_vector = vector;
+    current->fault_error_code = error_code;
+    current->fault_address = fault_address;
+    current->context.r15 = frame.r15;
+    current->context.r14 = frame.r14;
+    current->context.r13 = frame.r13;
+    current->context.r12 = frame.r12;
+    current->context.r11 = frame.r11;
+    current->context.r10 = frame.r10;
+    current->context.r9 = frame.r9;
+    current->context.r8 = frame.r8;
+    current->context.rbp = frame.rbp;
+    current->context.rdi = frame.rdi;
+    current->context.rsi = frame.rsi;
+    current->context.rdx = frame.rdx;
+    current->context.rcx = frame.rcx;
+    current->context.rbx = frame.rbx;
+    current->context.rax = frame.rax;
+    current->context.rip = frame.rip;
+    current->context.rsp = frame.rsp;
+    current->context.rflags = frame.rflags;
+    current->context.cs = static_cast<uint16_t>(frame.cs);
+    current->context.ss = static_cast<uint16_t>(frame.ss);
+    current->context.return_kind = ReturnKind::Iret;
+    mark_exited(*current, -static_cast<int64_t>(vector));
+
+    debug::write("[FAULT] vector=");
+    debug_write_decimal(vector);
+    debug::write(" error=");
+    debug_write_hex(error_code);
+    debug::write(" cs=");
+    debug_write_hex(frame.cs);
+    debug::write(" cr2=");
+    debug_write_hex(fault_address);
+    debug::write(" pid=");
+    debug_write_decimal(current->pid);
+    debug::put_char('\n');
+    debug::write("[PASS] user fault captured\n");
+    debug::write("[PASS] faulty process terminated\n");
+    scheduler::return_to_host(
+        *current,
+        current->context,
+        scheduler::HostReason::Fault);
 }
 
 }

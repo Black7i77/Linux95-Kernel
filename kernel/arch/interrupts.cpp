@@ -6,6 +6,7 @@
 #include "arch/pit.hpp"
 #include "arch/x86_64/segments.hpp"
 #include "panic/panic.hpp"
+#include "process/process.hpp"
 
 #include <stddef.h>
 #include <stdint.h>
@@ -87,6 +88,18 @@ extern "C" void interrupt_dispatch(
     }
 
     if (frame->vector < 32) {
+        const bool from_user = (frame->cs & 0x3U) == 0x3U;
+        const bool user_fatal_exception =
+            frame->vector != 2 &&
+            frame->vector != 8 &&
+            frame->vector != 18;
+        if (from_user && user_fatal_exception &&
+            process::handle_user_fault(
+                static_cast<uint8_t>(frame->vector),
+                frame->error_code,
+                *frame)) {
+            return;
+        }
         panic::exception(frame->vector, frame->error_code);
     }
 

@@ -22,6 +22,7 @@ KERNEL_LBA := 17
 KERNEL_SECTORS := 256
 IMAGE_SECTORS := 273
 STORAGE_TEST_IMAGE := $(BUILD)/linux95-storage-test.img
+FAULT_TEST_IMAGE := $(BUILD)/linux95-fault-test.img
 
 HOST_CXXFLAGS := -std=c++17 -Wall -Wextra -Werror -O2 -Ikernel
 
@@ -129,11 +130,17 @@ $(BUILD)/user/init.o: user/init/main.cpp user/include/linux95_syscall.hpp | $(BU
 $(BUILD)/user/worker.o: user/worker/main.cpp user/include/linux95_syscall.hpp | $(BUILD)/user
 >$(CXX) $(USER_CXXFLAGS) -c $< -o $@
 
+$(BUILD)/user/fault.o: user/fault/main.cpp | $(BUILD)/user
+>$(CXX) $(USER_CXXFLAGS) -c $< -o $@
+
 $(BUILD)/user/init.elf: $(BUILD)/user/start.o $(BUILD)/user/init.o user/user.ld
 >$(LD) -nostdlib -static -no-pie -z max-page-size=0x1000 -T user/user.ld -o $@ $(BUILD)/user/start.o $(BUILD)/user/init.o
 
 $(BUILD)/user/worker.elf: $(BUILD)/user/start.o $(BUILD)/user/worker.o user/user.ld
 >$(LD) -nostdlib -static -no-pie -z max-page-size=0x1000 -T user/user.ld -o $@ $(BUILD)/user/start.o $(BUILD)/user/worker.o
+
+$(BUILD)/user/fault.elf: $(BUILD)/user/start.o $(BUILD)/user/fault.o user/user.ld
+>$(LD) -nostdlib -static -no-pie -z max-page-size=0x1000 -T user/user.ld -o $@ $(BUILD)/user/start.o $(BUILD)/user/fault.o
 
 $(BUILD)/int80_entry.o: kernel/syscall/int80_entry.asm | $(BUILD)
 >$(NASM) -f elf64 $< -o $@
@@ -540,6 +547,9 @@ $(NETWORK_TEST_IMAGE): \
 
 $(STORAGE_TEST_IMAGE): | $(BUILD)
 >$(PYTHON) tests/prepare_fat32_image.py $@
+
+$(FAULT_TEST_IMAGE): tests/prepare_fat32_image.py $(BUILD)/user/fault.elf $(BUILD)/user/worker.elf | $(BUILD)
+>$(PYTHON) tests/prepare_fat32_image.py $@ --process-fault
 
 prepare-storage-test-image: | $(BUILD)
 >@for tool in mkfs.fat mmd mcopy; do \

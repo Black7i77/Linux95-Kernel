@@ -161,6 +161,38 @@ require("kernel/memory/user_space.cpp", "destination[i] = source[i] & ~kUserBit;
 require("kernel/memory/user_space.cpp", "validate_user_range")
 require("kernel/memory/user_space.cpp", "for (uint64_t page = span.first_page;")
 
+interrupt_source = (ROOT / "kernel/arch/interrupts.cpp").read_text()
+if "const bool from_user = (frame->cs & 0x3U) == 0x3U;" not in interrupt_source:
+    raise SystemExit("FAIL: exception origin is not classified from saved CS")
+require("kernel/arch/interrupts.cpp", "process::handle_user_fault(")
+require("kernel/arch/interrupts.cpp", "panic::exception(frame->vector, frame->error_code);")
+require("kernel/arch/interrupts.asm", "ISR_ERR   13")
+require("kernel/arch/interrupts.asm", "ISR_ERR   14")
+require("kernel/arch/interrupts.asm", "ISR_NOERR 6")
+require("kernel/process/process.hpp", "bool handle_user_fault(uint8_t vector,")
+require("kernel/process/scheduler.cpp", "asm volatile(\"mov %%cr2, %0\"")
+require("kernel/process/scheduler.cpp", "scheduler::HostReason::Fault")
+require("kernel/process/scheduler.cpp", "[PASS] kernel survived user fault")
+require("kernel/process/scheduler.cpp", "[PASS] faulty process terminated")
+require("kernel/arch/interrupts.hpp", "uint64_t rsp;")
+require("kernel/arch/interrupts.hpp", "uint64_t ss;")
+require("user/fault/main.cpp", "0x0000500000000000ULL")
+require("tests/prepare_fat32_image.py", "--process-fault")
+require("tests/prepare_fat32_image.py", "::USER/FAULT.ELF")
+require("tests/qemu_smoke.py", "--process-fault-test")
+require("tests/qemu_smoke.py", "[PASS] user fault captured")
+require("tests/qemu_smoke.py", "[PASS] kernel survived user fault")
+
+makefile_text = (ROOT / "Makefile").read_text()
+normal_build_line = next(
+    line for line in makefile_text.splitlines() if line.startswith("all:")
+)
+if "fault" in normal_build_line:
+    raise SystemExit("FAIL: FAULT.ELF leaked into the normal build")
+kernel_startup = (ROOT / "kernel/kernel.cpp").read_text()
+if "FAULT.ELF" in kernel_startup:
+    raise SystemExit("FAIL: FAULT.ELF leaked into normal process autostart")
+
 require_rtl8139_hardware_isolation()
 require_network_coordinator_contract()
 

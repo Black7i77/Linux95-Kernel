@@ -25,6 +25,9 @@ struct InterruptFrame {
     uint64_t rip;
     uint64_t cs;
     uint64_t rflags;
+    // Hardware appends these two words only for a CPL3 -> CPL0 entry.
+    uint64_t rsp;
+    uint64_t ss;
 };
 
 void initialize();

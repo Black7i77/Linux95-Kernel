@@ -8,19 +8,27 @@ import time
 
 WITHOUT_NETWORK = "--without-network" in sys.argv[1:]
 PROCESS_SELF_TEST = "--process-self-test" in sys.argv[1:]
+PROCESS_FAULT_TEST = "--process-fault-test" in sys.argv[1:]
 
-if any(argument not in ("--without-network", "--process-self-test")
+if (PROCESS_SELF_TEST and PROCESS_FAULT_TEST) or any(
+        argument not in ("--without-network", "--process-self-test",
+                         "--process-fault-test")
        for argument in sys.argv[1:]):
-    print("usage: qemu_smoke.py [--without-network] [--process-self-test]")
+    print("usage: qemu_smoke.py [--without-network] [--process-self-test] "
+          "[--process-fault-test]")
     sys.exit(2)
 
 ROOT = Path(__file__).resolve().parents[1]
 IMAGE = ROOT / "build" / (
     "linux95-kernel.img"
-    if WITHOUT_NETWORK or PROCESS_SELF_TEST
+    if WITHOUT_NETWORK or PROCESS_SELF_TEST or PROCESS_FAULT_TEST
     else "linux95-kernel-network-test.img"
 )
-STORAGE_IMAGE = ROOT / "build" / "linux95-storage-test.img"
+STORAGE_IMAGE = ROOT / "build" / (
+    "linux95-fault-test.img"
+    if PROCESS_FAULT_TEST
+    else "linux95-storage-test.img"
+)
 LOG = ROOT / "build" / "qemu-debug.log"
 
 QEMU = shutil.which("qemu-system-x86_64")
@@ -29,6 +37,13 @@ if QEMU is None:
     print("qemu smoke test: FAIL")
     print("qemu-system-x86_64 was not found in PATH")
     sys.exit(1)
+
+if PROCESS_FAULT_TEST:
+    subprocess.run(
+        ["make", "all", "build/linux95-fault-test.img"],
+        cwd=ROOT,
+        check=True,
+    )
 
 if not IMAGE.is_file():
     print("qemu smoke test: FAIL")
@@ -59,7 +74,7 @@ cmd = [
     "-global", "isa-debugcon.iobase=0xe9",
 ]
 
-if not WITHOUT_NETWORK and not PROCESS_SELF_TEST:
+if not WITHOUT_NETWORK and not PROCESS_SELF_TEST and not PROCESS_FAULT_TEST:
     cmd.extend([
         "-netdev", "user,id=net0",
         "-device", "rtl8139,netdev=net0",
@@ -78,7 +93,7 @@ completion_seen_at = None
 early_exit = None
 completion_marker = (
     "[PASS] desktop remained online"
-    if PROCESS_SELF_TEST
+    if PROCESS_SELF_TEST or PROCESS_FAULT_TEST
     else ("[PASS] desktop_online"
           if WITHOUT_NETWORK
           else "[PASS] icmp_echo_reply")
@@ -94,7 +109,7 @@ try:
         if LOG.exists():
             content = LOG.read_text(errors="replace")
             if completion_marker in content:
-                if not PROCESS_SELF_TEST:
+                if not (PROCESS_SELF_TEST or PROCESS_FAULT_TEST):
                     saw_completion = True
                     break
                 if completion_seen_at is None:
@@ -172,7 +187,7 @@ required = [
     "[PASS] desktop_online",
 ]
 
-if WITHOUT_NETWORK or PROCESS_SELF_TEST:
+if WITHOUT_NETWORK or PROCESS_SELF_TEST or PROCESS_FAULT_TEST:
     if ("[WARN] pci_no_rtl8139" not in content and
             "[WARN] network_offline" not in content):
         required.append("[WARN] pci_no_rtl8139 or [WARN] network_offline")
@@ -196,6 +211,17 @@ if PROCESS_SELF_TEST:
         "[PASS] cooperative process switch",
         "[PASS] pid2 exited",
         "[PASS] pid1 exited",
+        "[PASS] desktop remained online",
+    ])
+
+if PROCESS_FAULT_TEST:
+    required.extend([
+        "[PASS] process subsystem initialized",
+        "[PASS] pid1 ELF loaded",
+        "[PASS] pid2 ELF loaded",
+        "[PASS] user fault captured",
+        "[PASS] faulty process terminated",
+        "[PASS] kernel survived user fault",
         "[PASS] desktop remained online",
     ])
 
@@ -270,10 +296,51 @@ if PROCESS_SELF_TEST:
         print(content or "(empty)")
         sys.exit(1)
 
+if PROCESS_FAULT_TEST:
+    fault_diagnostic = (
+        "[FAULT] vector=14 error=0x4 cs=0x23 "
+        "cr2=0x500000000000 pid=1"
+    )
+    fault_markers = [
+        "[PASS] process subsystem initialized",
+        "[PASS] pid1 ELF loaded",
+        "[PASS] pid2 ELF loaded",
+        "[PASS] user fault captured",
+        "[PASS] faulty process terminated",
+        "[PASS] kernel survived user fault",
+        "[PASS] process reaped",
+        "[PASS] desktop remained online",
+    ]
+    fault_positions = [content.find(marker) for marker in fault_markers]
+    if (content.count(fault_diagnostic) != 1 or
+            any(position < 0 for position in fault_positions) or
+            fault_positions != sorted(fault_positions)):
+        print("qemu smoke test: FAIL")
+        print("user-fault diagnostic/host-return order was invalid")
+        print("--- debug log ---")
+        print(content or "(empty)")
+        sys.exit(1)
+    if any(content.count(marker) != 1 for marker in fault_markers[:6]) or \
+            content.count(fault_markers[7]) != 1 or \
+            content.count("[PASS] process reaped") != 2:
+        print("qemu smoke test: FAIL")
+        print("fault markers/reaping did not occur exactly once per process")
+        print("--- debug log ---")
+        print(content or "(empty)")
+        sys.exit(1)
+    if (content.count("[BOOT] low_kernel_entry") != 1 or
+            "#DF" in content or "double fault" in content.lower() or
+            "triple fault" in content.lower() or "reset" in content.lower()):
+        print("qemu smoke test: FAIL")
+        print("fault isolation encountered a reset or double fault")
+        print("--- debug log ---")
+        print(content or "(empty)")
+        sys.exit(1)
+
 print("[PASS] Linux95 booted in QEMU")
 print("[PASS] x86_64 kernel entered kernel_main")
 print("[PASS] kernel initialization reached graphical desktop")
-if WITHOUT_NETWORK or PROCESS_SELF_TEST:
+if WITHOUT_NETWORK or PROCESS_SELF_TEST or PROCESS_FAULT_TEST:
     print("[PASS] missing RTL8139 remained non-fatal")
 else:
     print("[PASS] RTL8139 network stack initialized")

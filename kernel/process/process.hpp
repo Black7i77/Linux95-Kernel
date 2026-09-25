@@ -5,6 +5,10 @@
 
 #include "process/context.hpp"
 
+namespace linux95::interrupts {
+struct InterruptFrame;
+}
+
 namespace linux95::process {
 
 enum class State {
@@ -27,6 +31,8 @@ struct Process {
     UserContext context;
     int64_t exit_code;
     uint32_t fault_vector;
+    uint64_t fault_error_code;
+    uint64_t fault_address;
 };
 
 struct ReapOperations {
@@ -53,5 +59,8 @@ void mark_exited(Process& process, int64_t code);
 void reap_exited();
 void reap_one_for_test(Process& process);
 void reap_one_for_test(Process& process, const ReapOperations& operations);
+bool handle_user_fault(uint8_t vector,
+                       uint64_t error_code,
+                       const interrupts::InterruptFrame& frame);
 
 }
