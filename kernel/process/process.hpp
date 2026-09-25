@@ -34,5 +34,6 @@ Process* allocate();
 Process* find(uint32_t pid);
 void release(Process& process);
 size_t capacity();
+Process* table();
 
 }

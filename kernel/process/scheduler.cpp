@@ -1,6 +1,18 @@
 #include "process/scheduler.hpp"
 
+#include "arch/x86_64/control_regs.hpp"
+#include "arch/x86_64/tss.hpp"
+#include "syscall/syscall.hpp"
+
 namespace linux95::scheduler {
+
+namespace {
+
+process::HostContext g_host_context{};
+uint64_t g_host_cr3 = 0;
+int g_previous_slot = -1;
+
+}
 
 int choose_next(const linux95::process::Process* table,
                 size_t count,
@@ -17,6 +29,47 @@ int choose_next(const linux95::process::Process* table,
         }
     }
     return -1;
+}
+
+bool run_once()
+{
+    process::Process* table = process::table();
+    const int slot = choose_next(
+        table,
+        process::capacity(),
+        g_previous_slot);
+    if (slot < 0) {
+        return false;
+    }
+
+    process::Process& selected = table[slot];
+    g_previous_slot = slot;
+    selected.state = process::State::Running;
+    g_host_cr3 = arch::x86_64::read_cr3();
+
+    if (process::process_save_host(&g_host_context) == 0) {
+        arch::x86_64::write_cr3(selected.page_table_physical);
+        arch::x86_64::set_tss_rsp0(selected.kernel_stack_top);
+        syscall::set_cpu_process(
+            &selected,
+            selected.kernel_stack_top);
+        process::process_resume_user(&selected.context);
+    }
+
+    return true;
+}
+
+[[noreturn]] void return_to_host(
+    process::Process& process,
+    process::UserContext& context,
+    HostReason reason)
+{
+    (void) process;
+    (void) context;
+    (void) reason;
+    arch::x86_64::write_cr3(g_host_cr3);
+    syscall::set_cpu_process(nullptr, 0);
+    process::process_restore_host(&g_host_context);
 }
 
 }

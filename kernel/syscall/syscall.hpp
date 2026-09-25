@@ -39,6 +39,9 @@ struct CpuLocalState {
     uint64_t saved_user_rsp;
 };
 
+CpuLocalState& cpu_local_state();
+void set_cpu_process(process::Process* process, uint64_t kernel_stack_top);
+
 Result dispatch(process::Process& process, Frame& frame);
 Result dispatch_for_test(process::Process& process, Frame& frame);
 void initialize_fast_path();
@@ -58,5 +61,5 @@ constexpr uint64_t encode_star_for_test(uint16_t kernel_code,
 
 } // namespace linux95::syscall
 
-extern "C" void int80_bridge(linux95::syscall::Frame* frame);
+extern "C" uint64_t int80_bridge(linux95::syscall::Frame* frame);
 extern "C" uint64_t syscall_bridge(linux95::syscall::Frame* frame);

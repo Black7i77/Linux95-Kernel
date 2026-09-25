@@ -7,15 +7,17 @@ import sys
 import time
 
 WITHOUT_NETWORK = "--without-network" in sys.argv[1:]
+PROCESS_SELF_TEST = "--process-self-test" in sys.argv[1:]
 
-if any(argument != "--without-network" for argument in sys.argv[1:]):
-    print("usage: qemu_smoke.py [--without-network]")
+if any(argument not in ("--without-network", "--process-self-test")
+       for argument in sys.argv[1:]):
+    print("usage: qemu_smoke.py [--without-network] [--process-self-test]")
     sys.exit(2)
 
 ROOT = Path(__file__).resolve().parents[1]
 IMAGE = ROOT / "build" / (
     "linux95-kernel.img"
-    if WITHOUT_NETWORK
+    if WITHOUT_NETWORK or PROCESS_SELF_TEST
     else "linux95-kernel-network-test.img"
 )
 STORAGE_IMAGE = ROOT / "build" / "linux95-storage-test.img"
@@ -57,7 +59,7 @@ cmd = [
     "-global", "isa-debugcon.iobase=0xe9",
 ]
 
-if not WITHOUT_NETWORK:
+if not WITHOUT_NETWORK and not PROCESS_SELF_TEST:
     cmd.extend([
         "-netdev", "user,id=net0",
         "-device", "rtl8139,netdev=net0",
@@ -75,7 +77,7 @@ saw_completion = False
 early_exit = None
 completion_marker = (
     "[PASS] desktop_online"
-    if WITHOUT_NETWORK
+    if WITHOUT_NETWORK or PROCESS_SELF_TEST
     else "[PASS] icmp_echo_reply"
 )
 
@@ -161,7 +163,7 @@ required = [
     "[PASS] desktop_online",
 ]
 
-if WITHOUT_NETWORK:
+if WITHOUT_NETWORK or PROCESS_SELF_TEST:
     if ("[WARN] pci_no_rtl8139" not in content and
             "[WARN] network_offline" not in content):
         required.append("[WARN] pci_no_rtl8139 or [WARN] network_offline")
@@ -175,6 +177,12 @@ else:
         "[PASS] icmp_ready",
         "[PASS] arp_gateway_resolved",
         "[PASS] icmp_echo_reply",
+    ])
+
+if PROCESS_SELF_TEST:
+    required.extend([
+        "[PASS] entered ring3",
+        "[PASS] int80 syscall path",
     ])
 
 missing = [marker for marker in required if marker not in content]
@@ -196,7 +204,7 @@ if missing:
 print("[PASS] Linux95 booted in QEMU")
 print("[PASS] x86_64 kernel entered kernel_main")
 print("[PASS] kernel initialization reached graphical desktop")
-if WITHOUT_NETWORK:
+if WITHOUT_NETWORK or PROCESS_SELF_TEST:
     print("[PASS] missing RTL8139 remained non-fatal")
 else:
     print("[PASS] RTL8139 network stack initialized")

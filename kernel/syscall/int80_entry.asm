@@ -27,6 +27,8 @@ int80_entry:
     mov rdi, rbx
     and rsp, -16
     call int80_bridge
+    test rax, rax
+    jz .halt
     mov rsp, rbx
 
     pop r15
@@ -45,3 +47,9 @@ int80_entry:
     pop rbx
     pop rax
     iretq
+
+.halt:
+    cli
+.halt_loop:
+    hlt
+    jmp .halt_loop

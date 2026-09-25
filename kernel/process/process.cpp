@@ -48,4 +48,8 @@ size_t capacity() {
     return kProcessCapacity;
 }
 
+Process* table() {
+    return g_processes;
+}
+
 }

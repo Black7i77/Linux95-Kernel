@@ -8,6 +8,7 @@
 #include "gui/system_info_app.hpp"
 #include "gui/terminal_app.hpp"
 #include "net/network.hpp"
+#include "process/scheduler.hpp"
 
 namespace linux95::desktop {
 namespace {
@@ -1780,6 +1781,7 @@ graphics::Rect DirtyRegionQueue::rect(
         bool had_event = false;
 
         network::poll();
+        scheduler::run_once();
         if (state.terminal_app.poll()) {
             invalidate_window(
                 state,

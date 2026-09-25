@@ -53,6 +53,7 @@ KERNEL_OBJS := \
 	$(BUILD)/interrupts_asm.o \
 	$(BUILD)/int80_entry.o \
 	$(BUILD)/syscall_entry.o \
+	$(BUILD)/context.o \
 	$(BUILD)/paging_bootstrap.o \
 	$(BUILD)/segments_asm.o \
 	$(BUILD)/kernel.o \
@@ -82,6 +83,7 @@ KERNEL_OBJS := \
 	$(BUILD)/user_space.o \
 	$(BUILD)/elf.o \
 	$(BUILD)/process.o \
+	$(BUILD)/scheduler.o \
 	$(BUILD)/syscall.o \
 	$(BUILD)/segments.o \
 	$(BUILD)/tss.o \
@@ -138,6 +140,12 @@ $(BUILD)/int80_entry.o: kernel/syscall/int80_entry.asm | $(BUILD)
 
 $(BUILD)/syscall_entry.o: kernel/syscall/syscall_entry.asm | $(BUILD)
 >$(NASM) -f elf64 $< -o $@
+
+$(BUILD)/context.o: kernel/process/context.asm | $(BUILD)
+>$(NASM) -f elf64 $< -o $@
+
+$(BUILD)/scheduler.o: kernel/process/scheduler.cpp kernel/process/scheduler.hpp | $(BUILD)
+>$(CXX) $(CXXFLAGS) -c $< -o $@
 
 $(BUILD)/stage1.bin: boot/stage1.asm | $(BUILD)
 >$(NASM) -f bin $< -o $@
@@ -311,7 +319,7 @@ test-host-process: $(BUILD)/host-process-test
 >$(BUILD)/host-process-test
 
 $(BUILD)/host-scheduler-test: tests/host/scheduler_test.cpp kernel/process/scheduler.cpp kernel/process/scheduler.hpp kernel/process/process.hpp kernel/process/context.hpp | $(BUILD)
->$(CXX) $(HOST_CXXFLAGS) tests/host/scheduler_test.cpp kernel/process/scheduler.cpp -o $@
+>$(CXX) $(HOST_CXXFLAGS) -ffunction-sections -fdata-sections tests/host/scheduler_test.cpp kernel/process/scheduler.cpp -Wl,--gc-sections -o $@
 
 test-host-scheduler: $(BUILD)/host-scheduler-test
 >$(BUILD)/host-scheduler-test

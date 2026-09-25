@@ -20,4 +20,19 @@ struct UserContext {
     ReturnKind return_kind;
 };
 
+struct HostContext {
+    uint64_t rsp;
+    uint64_t rip;
+    uint64_t rbx;
+    uint64_t rbp;
+    uint64_t r12;
+    uint64_t r13;
+    uint64_t r14;
+    uint64_t r15;
+};
+
+extern "C" int process_save_host(HostContext* context);
+extern "C" [[noreturn]] void process_restore_host(const HostContext* context);
+extern "C" [[noreturn]] void process_resume_user(const UserContext* context);
+
 }
