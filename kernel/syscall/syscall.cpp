@@ -37,12 +37,19 @@ Result number_action(process::Process& process, Frame& frame)
     return {kNotImplemented, Action::ReturnToUser};
 }
 
-void emit_process_exit_marker(bool from_user)
+void emit_process_exit_marker(const process::Process& process, bool from_user)
 {
-    static bool emitted = false;
-    if (from_user && !emitted) {
-        emitted = true;
-        debug::write("[PASS] process exited\n");
+    static bool pid1_emitted = false;
+    static bool pid2_emitted = false;
+    if (!from_user) {
+        return;
+    }
+    if (process.pid == 1 && !pid1_emitted) {
+        pid1_emitted = true;
+        debug::write("[PASS] pid1 exited\n");
+    } else if (process.pid == 2 && !pid2_emitted) {
+        pid2_emitted = true;
+        debug::write("[PASS] pid2 exited\n");
     }
 }
 
@@ -206,7 +213,9 @@ extern "C" uint64_t int80_bridge(linux95::syscall::Frame* frame)
             process->context,
             linux95::scheduler::HostReason::Yield);
     }
-    linux95::syscall::emit_process_exit_marker((frame->cs & 3U) == 3U);
+    linux95::syscall::emit_process_exit_marker(
+        *process,
+        (frame->cs & 3U) == 3U);
     linux95::scheduler::return_to_host(
         *process,
         process->context,
@@ -221,6 +230,11 @@ extern "C" uint64_t syscall_bridge(linux95::syscall::Frame* frame)
     }
     const linux95::syscall::Result result = linux95::syscall::dispatch(
         *linux95::syscall::g_cpu_local_state.current_process, *frame);
+    static bool ring3_syscall_seen = false;
+    if (!ring3_syscall_seen && (frame->cs & 3U) == 3U) {
+        ring3_syscall_seen = true;
+        linux95::debug::write("[PASS] syscall path\n");
+    }
     frame->rax = static_cast<uint64_t>(result.value);
     linux95::process::Process& process =
         *linux95::syscall::g_cpu_local_state.current_process;
@@ -237,7 +251,9 @@ extern "C" uint64_t syscall_bridge(linux95::syscall::Frame* frame)
                 process.context,
                 linux95::scheduler::HostReason::Yield);
         }
-        linux95::syscall::emit_process_exit_marker((frame->cs & 3U) == 3U);
+        linux95::syscall::emit_process_exit_marker(
+            process,
+            (frame->cs & 3U) == 3U);
         linux95::syscall::restore_host_gs_after_syscall();
         linux95::scheduler::return_to_host(
             process,

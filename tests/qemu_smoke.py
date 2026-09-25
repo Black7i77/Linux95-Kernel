@@ -77,7 +77,7 @@ saw_completion = False
 completion_seen_at = None
 early_exit = None
 completion_marker = (
-    "[PASS] process reaped"
+    "[PASS] desktop remained online"
     if PROCESS_SELF_TEST
     else ("[PASS] desktop_online"
           if WITHOUT_NETWORK
@@ -99,7 +99,7 @@ try:
                     break
                 if completion_seen_at is None:
                     completion_seen_at = time.monotonic()
-                elif time.monotonic() - completion_seen_at >= 0.25:
+                elif time.monotonic() - completion_seen_at >= 1.0:
                     saw_completion = True
                     break
 
@@ -192,8 +192,11 @@ if PROCESS_SELF_TEST:
     required.extend([
         "[PASS] entered ring3",
         "[PASS] int80 syscall path",
-        "[PASS] process exited",
-        "[PASS] process reaped",
+        "[PASS] syscall path",
+        "[PASS] cooperative process switch",
+        "[PASS] pid2 exited",
+        "[PASS] pid1 exited",
+        "[PASS] desktop remained online",
     ])
 
 missing = [marker for marker in required if marker not in content]
@@ -212,12 +215,60 @@ if missing:
         print(stderr.strip())
     sys.exit(1)
 
-if PROCESS_SELF_TEST and content.count("[PASS] process exited") != 1:
-    print("qemu smoke test: FAIL")
-    print("process exit marker was not emitted exactly once")
-    print("--- debug log ---")
-    print(content or "(empty)")
-    sys.exit(1)
+if PROCESS_SELF_TEST:
+    ordered_markers = [
+        "[PASS] process subsystem initialized",
+        "[PASS] pid1 ELF loaded",
+        "[PASS] pid2 ELF loaded",
+        "[PASS] entered ring3",
+        "[PASS] int80 syscall path",
+        "[PASS] syscall path",
+        "[PASS] cooperative process switch",
+        "[PASS] pid2 exited",
+        "[PASS] pid1 exited",
+        "[PASS] desktop remained online",
+    ]
+    marker_positions = [content.find(marker) for marker in ordered_markers]
+    if any(position < 0 for position in marker_positions) or marker_positions != sorted(marker_positions):
+        print("qemu smoke test: FAIL")
+        print("process markers did not appear in required order")
+        print("--- debug log ---")
+        print(content or "(empty)")
+        sys.exit(1)
+
+    user_messages = [
+        "[pid 1] hello through int 0x80",
+        "[pid 2] hello through syscall",
+        "[pid 1] resumed through syscall",
+        "[pid 2] resumed through int 0x80",
+    ]
+    message_positions = [content.find(message) for message in user_messages]
+    if any(position < 0 for position in message_positions) or message_positions != sorted(message_positions):
+        print("qemu smoke test: FAIL")
+        print("user messages did not appear in required round-robin order")
+        print("--- debug log ---")
+        print(content or "(empty)")
+        sys.exit(1)
+    if any(content.count(message) != 1 for message in user_messages):
+        print("qemu smoke test: FAIL")
+        print("a user message was missing or appeared more than once")
+        print("--- debug log ---")
+        print(content or "(empty)")
+        sys.exit(1)
+    if (content.count("[PASS] pid2 exited") != 1 or
+            content.count("[PASS] pid1 exited") != 1 or
+            content.count("[PASS] process reaped") != 2):
+        print("qemu smoke test: FAIL")
+        print("exit/reap lifecycle markers had unexpected counts")
+        print("--- debug log ---")
+        print(content or "(empty)")
+        sys.exit(1)
+    if message_positions[-1] > content.find("[PASS] pid2 exited"):
+        print("qemu smoke test: FAIL")
+        print("user output continued after process exit")
+        print("--- debug log ---")
+        print(content or "(empty)")
+        sys.exit(1)
 
 print("[PASS] Linux95 booted in QEMU")
 print("[PASS] x86_64 kernel entered kernel_main")

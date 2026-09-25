@@ -13,6 +13,9 @@ process::HostContext g_host_context{};
 uint64_t g_host_cr3 = 0;
 uint64_t g_host_rflags = 0;
 int g_previous_slot = -1;
+uint32_t g_last_yielded_pid = 0;
+size_t g_reaped_process_count = 0;
+bool g_desktop_survival_emitted = false;
 
 uint64_t read_rflags()
 {
@@ -75,7 +78,17 @@ bool run_once()
 
     if (selected.state == process::State::Exited) {
         process::reap_exited();
+        ++g_reaped_process_count;
         debug::write("[PASS] process reaped\n");
+        const int next_slot = choose_next(
+            process::table(),
+            process::capacity(),
+            g_previous_slot);
+        if (g_reaped_process_count >= 2 && next_slot < 0 &&
+            !g_desktop_survival_emitted) {
+            g_desktop_survival_emitted = true;
+            debug::write("[PASS] desktop remained online\n");
+        }
     }
 
     return true;
@@ -86,9 +99,19 @@ bool run_once()
     process::UserContext& context,
     HostReason reason)
 {
-    (void) process;
     (void) context;
-    (void) reason;
+    if (reason == HostReason::Yield &&
+        process.state == process::State::Ready) {
+        if (g_last_yielded_pid != 0 &&
+            g_last_yielded_pid != process.pid) {
+            static bool switch_emitted = false;
+            if (!switch_emitted) {
+                switch_emitted = true;
+                debug::write("[PASS] cooperative process switch\n");
+            }
+        }
+        g_last_yielded_pid = process.pid;
+    }
     arch::x86_64::write_cr3(g_host_cr3);
     syscall::set_cpu_process(nullptr, 0);
     process::process_restore_host(&g_host_context);
