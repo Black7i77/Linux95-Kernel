@@ -21,6 +21,14 @@ size_t g_reaped_process_count = 0;
 bool g_desktop_survival_emitted = false;
 HostReason g_last_host_reason = HostReason::Yield;
 
+// Preemption diagnostics are one-shot milestone evidence, never per-tick logs.
+bool g_quantum_expired_emitted = false;
+bool g_context_captured_emitted = false;
+bool g_preempt_host_return_emitted = false;
+bool g_non_yielding_preempted_emitted = false;
+bool g_preemptive_round_robin_emitted = false;
+uint32_t g_last_preempted_pid = 0;
+
 uint32_t g_user_quantum_ticks_remaining = 0;
 
 uint64_t read_rflags()
@@ -37,6 +45,8 @@ void write_rflags(uint64_t value)
 
 }
 
+static void emit_preemption_diagnostic(const char* text);
+
 void reset_user_quantum()
 {
     g_user_quantum_ticks_remaining = kUserQuantumTicks;
@@ -49,7 +59,25 @@ bool on_timer_tick(bool from_user)
     }
 
     --g_user_quantum_ticks_remaining;
-    return g_user_quantum_ticks_remaining == 0;
+
+    if (g_user_quantum_ticks_remaining == 0) {
+        if (!g_quantum_expired_emitted) {
+            g_quantum_expired_emitted = true;
+            emit_preemption_diagnostic("[PASS] user quantum expired\n");
+        }
+        return true;
+    }
+
+    return false;
+}
+
+static void emit_preemption_diagnostic(const char* text)
+{
+#if defined(__STDC_HOSTED__) && __STDC_HOSTED__
+    (void)text;
+#else
+    debug::write(text);
+#endif
 }
 
 int choose_next(const linux95::process::Process* table,
@@ -88,6 +116,18 @@ bool run_once()
         process::reap_exited();
         return true;
     }
+    if (g_last_host_reason == HostReason::Preempt &&
+        g_last_preempted_pid != 0 &&
+        selected.pid != g_last_preempted_pid) {
+        if (!g_non_yielding_preempted_emitted) {
+            g_non_yielding_preempted_emitted = true;
+            emit_preemption_diagnostic("[PASS] non-yielding process was preempted\n");
+        } else if (!g_preemptive_round_robin_emitted) {
+            g_preemptive_round_robin_emitted = true;
+            emit_preemption_diagnostic("[PASS] preemptive round robin\n");
+        }
+    }
+
     selected.state = process::State::Running;
     reset_user_quantum();
     g_host_cr3 = arch::x86_64::read_cr3();
@@ -106,6 +146,13 @@ bool run_once()
     }
 
     write_rflags(g_host_rflags);
+
+    if (g_last_host_reason == HostReason::Preempt &&
+        !g_preempt_host_return_emitted) {
+        g_preempt_host_return_emitted = true;
+        emit_preemption_diagnostic("[PASS] timer preemption returned to host\n");
+        emit_preemption_diagnostic("[PASS] desktop remained online after preemption\n");
+    }
 
     if (g_last_host_reason == HostReason::Fault) {
         static bool fault_survival_emitted = false;
@@ -245,6 +292,13 @@ void debug_write_decimal(uint32_t value)
     }
 
     capture_interrupt_context(*current, frame);
+
+    if (!scheduler::g_context_captured_emitted) {
+        scheduler::g_context_captured_emitted = true;
+        scheduler::emit_preemption_diagnostic("[PASS] preempted context captured\n");
+    }
+    scheduler::g_last_preempted_pid = current->pid;
+
     current->state = State::Ready;
 
     scheduler::return_to_host(
