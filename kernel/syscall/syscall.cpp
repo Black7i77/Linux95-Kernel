@@ -1,10 +1,20 @@
 #include "syscall/syscall.hpp"
 
 #include "arch/debug.hpp"
+#include "arch/x86_64/msr.hpp"
+#include "arch/x86_64/segments.hpp"
 #include "memory/user_space.hpp"
 
 namespace linux95::syscall {
+
+constexpr uint64_t kFlagTrap = 1ULL << 8;
+constexpr uint64_t kFlagInterrupt = 1ULL << 9;
+constexpr uint64_t kFlagDirection = 1ULL << 10;
+CpuLocalState g_cpu_local_state{};
+
 namespace {
+
+extern "C" void syscall_entry();
 
 constexpr int64_t kBadDescriptor = -9;
 constexpr int64_t kFault = -14;
@@ -57,6 +67,40 @@ Result safe_write(process::Process& process, Frame& frame)
 
 } // namespace
 
+bool valid_sysret_target(uint64_t rip, uint64_t rsp)
+{
+    constexpr uint64_t kUserLimit = 0x0000800000000000ULL;
+    return rip < kUserLimit && rsp < kUserLimit;
+}
+
+void initialize_fast_path()
+{
+    g_cpu_local_state.current_process = nullptr;
+    g_cpu_local_state.kernel_stack_top = 0;
+    g_cpu_local_state.saved_user_rsp = 0;
+    arch::x86_64::write_msr(
+        arch::x86_64::kIa32KernelGsBase,
+        reinterpret_cast<uint64_t>(&g_cpu_local_state));
+    const uint64_t efer =
+        arch::x86_64::read_msr(arch::x86_64::kIa32Efer);
+    arch::x86_64::write_msr(
+        arch::x86_64::kIa32Efer,
+        efer | arch::x86_64::kEferSystemCallEnable);
+    arch::x86_64::write_msr(
+        arch::x86_64::kIa32Star,
+        arch::x86_64::encode_star(
+            arch::x86_64::kKernelCodeSelector,
+            arch::x86_64::kKernelDataSelector,
+            arch::x86_64::kUserCodeSelector,
+            arch::x86_64::kUserDataSelector));
+    arch::x86_64::write_msr(
+        arch::x86_64::kIa32Lstar,
+        reinterpret_cast<uint64_t>(&syscall_entry));
+    arch::x86_64::write_msr(
+        arch::x86_64::kIa32Fmask,
+        kFlagTrap | kFlagInterrupt | kFlagDirection);
+}
+
 Result dispatch(process::Process& process, Frame& frame)
 {
     if (frame.rax == static_cast<uint64_t>(Number::Write)) {
@@ -89,4 +133,28 @@ extern "C" void int80_bridge(linux95::syscall::Frame* frame)
     const linux95::syscall::Result result =
         linux95::syscall::dispatch(*process, *frame);
     frame->rax = static_cast<uint64_t>(result.value);
+}
+
+extern "C" uint64_t syscall_bridge(linux95::syscall::Frame* frame)
+{
+    if (frame == nullptr ||
+        linux95::syscall::g_cpu_local_state.current_process == nullptr) {
+        return 0;
+    }
+    const linux95::syscall::Result result = linux95::syscall::dispatch(
+        *linux95::syscall::g_cpu_local_state.current_process, *frame);
+    frame->rax = static_cast<uint64_t>(result.value);
+    if (result.action != linux95::syscall::Action::ReturnToUser ||
+        !linux95::syscall::valid_sysret_target(
+            frame->rcx,
+            linux95::syscall::g_cpu_local_state.saved_user_rsp)) {
+        linux95::syscall::g_cpu_local_state.current_process->state =
+            linux95::process::State::Exited;
+        return 0;
+    }
+    frame->rflags = (frame->r11 | 0x2ULL) &
+                    ~(linux95::syscall::kFlagTrap |
+                      linux95::syscall::kFlagInterrupt |
+                      linux95::syscall::kFlagDirection);
+    return 1;
 }

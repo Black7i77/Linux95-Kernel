@@ -1,10 +1,26 @@
 #include <cassert>
 
 #include "memory/user_space.hpp"
+#include "arch/x86_64/msr.hpp"
+#include "arch/x86_64/segments.hpp"
 #include "syscall/syscall.hpp"
 
 int main() {
     using namespace linux95;
+    using syscall::valid_sysret_target;
+
+    constexpr uint64_t expected_star =
+        (0x13ULL << 48) | (0x08ULL << 32) | (0x10ULL << 16);
+    static_assert(syscall::encode_star_for_test(
+                      arch::x86_64::kKernelCodeSelector,
+                      arch::x86_64::kKernelDataSelector,
+                      arch::x86_64::kUserCodeSelector,
+                      arch::x86_64::kUserDataSelector) == expected_star);
+    static_assert(arch::x86_64::encode_star(
+                      arch::x86_64::kKernelCodeSelector,
+                      arch::x86_64::kKernelDataSelector,
+                      arch::x86_64::kUserCodeSelector,
+                      arch::x86_64::kUserDataSelector) == expected_star);
 
     process::Process p{};
     p.pid = 1;
@@ -34,6 +50,22 @@ int main() {
     };
     assert(!memory::validate_page_sequence(
         pages, 2, memory::UserAccess::Read));
+
+    assert(valid_sysret_target(
+        0x0000400000001000ULL,
+        0x00007FFFFFEFF000ULL));
+
+    assert(!valid_sysret_target(
+        0xFFFF800000001000ULL,
+        0x00007FFFFFEFF000ULL));
+
+    assert(!valid_sysret_target(
+        0x0000400000001000ULL,
+        0xFFFF800000001000ULL));
+
+    assert(!valid_sysret_target(
+        0x0000800000000000ULL,
+        0x00007FFFFFEFF000ULL));
 
     return 0;
 }

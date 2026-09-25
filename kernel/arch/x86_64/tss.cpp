@@ -1,6 +1,7 @@
 #include "arch/x86_64/tss.hpp"
 
 #include "arch/x86_64/segments.hpp"
+#include "syscall/syscall.hpp"
 
 namespace linux95::arch::x86_64 {
 
@@ -17,6 +18,7 @@ void initialize_tss()
     g_tss = {};
     g_tss.io_map_base = sizeof(TaskStateSegment);
     linux95_load_task_register(kTssSelector);
+    syscall::initialize_fast_path();
 }
 
 void set_tss_rsp0(uint64_t rsp0)

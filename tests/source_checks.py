@@ -112,6 +112,26 @@ require("kernel/syscall/int80_entry.asm", "iretq")
 require("kernel/syscall/syscall.cpp", "kMaxWriteLength = 4096")
 require("kernel/syscall/syscall.cpp", "memory::validate_user_range")
 require("kernel/syscall/syscall.cpp", "memory::copy_from_user")
+require("kernel/syscall/syscall.cpp", "initialize_fast_path")
+require("kernel/syscall/syscall.cpp", "valid_sysret_target")
+require("kernel/syscall/syscall.cpp", "kIa32Efer")
+require("kernel/syscall/syscall.cpp", "kIa32Star")
+require("kernel/syscall/syscall.cpp", "kIa32Lstar")
+require("kernel/syscall/syscall.cpp", "kIa32Fmask")
+require("kernel/syscall/syscall.cpp", "frame->rflags")
+require("kernel/arch/x86_64/msr.hpp", "rdmsr")
+require("kernel/arch/x86_64/msr.hpp", "wrmsr")
+syscall_entry_source = (ROOT / "kernel/syscall/syscall_entry.asm").read_text()
+for required in ("swapgs", "sysretq", "mov [gs:16], rsp",
+                 "mov rsp, [gs:8]", "call syscall_bridge"):
+    if required not in syscall_entry_source:
+        raise SystemExit(f"FAIL: syscall entry contract missing: {required}")
+entry_swapgs = syscall_entry_source.find("swapgs")
+entry_save_rsp = syscall_entry_source.find("mov [gs:16], rsp")
+entry_load_stack = syscall_entry_source.find("mov rsp, [gs:8]")
+entry_call = syscall_entry_source.find("call syscall_bridge")
+if not (0 <= entry_swapgs < entry_save_rsp < entry_load_stack < entry_call):
+    raise SystemExit("FAIL: syscall stack switch does not precede dispatcher call")
 if "reinterpret_cast<const char*>(frame.rsi)" in (
         ROOT / "kernel/syscall/syscall.cpp").read_text():
     raise SystemExit("FAIL: raw userspace pointer dereference in syscall write")

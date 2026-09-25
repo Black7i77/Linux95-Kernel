@@ -52,6 +52,7 @@ KERNEL_OBJS := \
 	$(BUILD)/entry.o \
 	$(BUILD)/interrupts_asm.o \
 	$(BUILD)/int80_entry.o \
+	$(BUILD)/syscall_entry.o \
 	$(BUILD)/paging_bootstrap.o \
 	$(BUILD)/segments_asm.o \
 	$(BUILD)/kernel.o \
@@ -133,6 +134,9 @@ $(BUILD)/user/worker.elf: $(BUILD)/user/start.o $(BUILD)/user/worker.o user/user
 >$(LD) -nostdlib -static -no-pie -z max-page-size=0x1000 -T user/user.ld -o $@ $(BUILD)/user/start.o $(BUILD)/user/worker.o
 
 $(BUILD)/int80_entry.o: kernel/syscall/int80_entry.asm | $(BUILD)
+>$(NASM) -f elf64 $< -o $@
+
+$(BUILD)/syscall_entry.o: kernel/syscall/syscall_entry.asm | $(BUILD)
 >$(NASM) -f elf64 $< -o $@
 
 $(BUILD)/stage1.bin: boot/stage1.asm | $(BUILD)
@@ -278,13 +282,13 @@ $(BUILD)/elf.o: kernel/user/elf.cpp kernel/user/elf.hpp kernel/memory/address.hp
 $(BUILD)/process.o: kernel/process/process.cpp kernel/process/process.hpp kernel/process/context.hpp | $(BUILD)
 >$(CXX) $(CXXFLAGS) -c $< -o $@
 
-$(BUILD)/syscall.o: kernel/syscall/syscall.cpp kernel/syscall/syscall.hpp kernel/process/process.hpp kernel/memory/user_space.hpp | $(BUILD)
+$(BUILD)/syscall.o: kernel/syscall/syscall.cpp kernel/syscall/syscall.hpp kernel/process/process.hpp kernel/memory/user_space.hpp kernel/arch/x86_64/msr.hpp | $(BUILD)
 >$(CXX) $(CXXFLAGS) -c $< -o $@
 
 $(BUILD)/segments.o: kernel/arch/x86_64/segments.cpp kernel/arch/x86_64/segments.hpp kernel/arch/x86_64/tss.hpp | $(BUILD)
 >$(CXX) $(CXXFLAGS) -c $< -o $@
 
-$(BUILD)/tss.o: kernel/arch/x86_64/tss.cpp kernel/arch/x86_64/tss.hpp kernel/arch/x86_64/segments.hpp | $(BUILD)
+$(BUILD)/tss.o: kernel/arch/x86_64/tss.cpp kernel/arch/x86_64/tss.hpp kernel/arch/x86_64/segments.hpp kernel/syscall/syscall.hpp | $(BUILD)
 >$(CXX) $(CXXFLAGS) -c $< -o $@
 
 $(BUILD)/self_test.o: kernel/memory/self_test.cpp kernel/memory/self_test.hpp kernel/memory/paging.hpp kernel/memory/physical.hpp kernel/memory/address.hpp | $(BUILD)
