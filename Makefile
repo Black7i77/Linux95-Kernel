@@ -88,7 +88,7 @@ KERNEL_OBJS := \
 NETWORK_TEST_OBJS := $(subst $(BUILD)/kernel.o,$(BUILD)/kernel-network-test.o,$(KERNEL_OBJS))
 NETWORK_TEST_IMAGE := $(BUILD)/linux95-kernel-network-test.img
 
-.PHONY: all clean run run-debug test test-qemu prepare-storage-test-image test-host-segments test-host-memory test-host-storage test-host-filesystem test-host-graphics test-host-pci test-host-rtl8139-helpers test-host-kernel-virtual-to-physical test-host-ethernet test-host-arp test-host-ipv4 test-host-icmp test-memory-source test-storage-source test-relocations check-tools
+.PHONY: all clean run run-debug test test-qemu prepare-storage-test-image test-host-segments test-host-process test-host-scheduler test-host-memory test-host-storage test-host-filesystem test-host-graphics test-host-pci test-host-rtl8139-helpers test-host-kernel-virtual-to-physical test-host-ethernet test-host-arp test-host-ipv4 test-host-icmp test-memory-source test-storage-source test-relocations check-tools
 
 all: check-tools $(BUILD)/linux95-kernel.img
 
@@ -255,6 +255,18 @@ $(BUILD)/host-segments-test: tests/host/segments_test.cpp | $(BUILD)
 
 test-host-segments: $(BUILD)/host-segments-test
 >$(BUILD)/host-segments-test
+
+$(BUILD)/host-process-test: tests/host/process_test.cpp kernel/process/process.cpp kernel/process/process.hpp kernel/process/context.hpp | $(BUILD)
+>$(CXX) $(HOST_CXXFLAGS) tests/host/process_test.cpp kernel/process/process.cpp -o $@
+
+test-host-process: $(BUILD)/host-process-test
+>$(BUILD)/host-process-test
+
+$(BUILD)/host-scheduler-test: tests/host/scheduler_test.cpp kernel/process/scheduler.cpp kernel/process/scheduler.hpp kernel/process/process.hpp kernel/process/context.hpp | $(BUILD)
+>$(CXX) $(HOST_CXXFLAGS) tests/host/scheduler_test.cpp kernel/process/scheduler.cpp -o $@
+
+test-host-scheduler: $(BUILD)/host-scheduler-test
+>$(BUILD)/host-scheduler-test
 
 $(BUILD)/host-page-bitmap-test: tests/host/page_bitmap_test.cpp kernel/memory/page_bitmap.hpp kernel/memory/address.hpp | $(BUILD)
 >$(CXX) $(HOST_CXXFLAGS) $< -o $@
@@ -467,7 +479,7 @@ test-storage-source:
 test-filesystem-source:
 >$(PYTHON) tests/filesystem_source_checks.py
 
-test: all test-host-memory test-host-storage test-host-segments test-host-filesystem test-host-graphics test-host-pci test-host-rtl8139-helpers test-host-kernel-virtual-to-physical test-host-ethernet test-host-arp test-host-ipv4 test-host-icmp
+test: all test-host-memory test-host-storage test-host-segments test-host-process test-host-scheduler test-host-filesystem test-host-graphics test-host-pci test-host-rtl8139-helpers test-host-kernel-virtual-to-physical test-host-ethernet test-host-arp test-host-ipv4 test-host-icmp
 >$(PYTHON) tests/source_checks.py
 >$(PYTHON) tests/image_checks.py
 >$(PYTHON) tests/memory_source_checks.py
