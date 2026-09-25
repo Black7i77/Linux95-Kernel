@@ -8,6 +8,7 @@ extern "C" int user_main()
     linux95::user::syscall_call(
         0, 1, reinterpret_cast<long>(hello), sizeof(hello) - 1);
     linux95::user::yield_syscall();
+    (void)linux95::user::syscall_call(999);
     linux95::user::int80_call(
         0, 1, reinterpret_cast<long>(resumed), sizeof(resumed) - 1);
     return 0;

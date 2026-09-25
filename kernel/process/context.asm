@@ -76,5 +76,4 @@ process_resume_user:
     and r11, ~(1 << 8 | 1 << 9 | 1 << 10)
     mov rsp, [rax + 128]
     mov rax, [rax + 112]
-    swapgs
     o64 sysret
