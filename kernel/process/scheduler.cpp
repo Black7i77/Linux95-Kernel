@@ -231,27 +231,7 @@ bool handle_user_fault(uint8_t vector,
     current->fault_vector = vector;
     current->fault_error_code = error_code;
     current->fault_address = fault_address;
-    current->context.r15 = frame.r15;
-    current->context.r14 = frame.r14;
-    current->context.r13 = frame.r13;
-    current->context.r12 = frame.r12;
-    current->context.r11 = frame.r11;
-    current->context.r10 = frame.r10;
-    current->context.r9 = frame.r9;
-    current->context.r8 = frame.r8;
-    current->context.rbp = frame.rbp;
-    current->context.rdi = frame.rdi;
-    current->context.rsi = frame.rsi;
-    current->context.rdx = frame.rdx;
-    current->context.rcx = frame.rcx;
-    current->context.rbx = frame.rbx;
-    current->context.rax = frame.rax;
-    current->context.rip = frame.rip;
-    current->context.rsp = frame.rsp;
-    current->context.rflags = frame.rflags;
-    current->context.cs = static_cast<uint16_t>(frame.cs);
-    current->context.ss = static_cast<uint16_t>(frame.ss);
-    current->context.return_kind = ReturnKind::Iret;
+    capture_interrupt_context(*current, frame);
     mark_exited(*current, -static_cast<int64_t>(vector));
 
     debug::write("[FAULT] vector=");

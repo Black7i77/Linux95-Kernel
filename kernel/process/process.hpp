@@ -56,6 +56,9 @@ void release(Process& process);
 size_t capacity();
 Process* table();
 void mark_exited(Process& process, int64_t code);
+void capture_interrupt_context(
+    Process& process,
+    const interrupts::InterruptFrame& frame);
 void reap_exited();
 void reap_one_for_test(Process& process);
 void reap_one_for_test(Process& process, const ReapOperations& operations);
