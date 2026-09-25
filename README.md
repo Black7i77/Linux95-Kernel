@@ -49,6 +49,8 @@ Verified architecture in this milestone:
 - interrupt-driven PS/2 keyboard
 - VBE 1280x720x32 graphical desktop with VGA text-shell fallback
 - QEMU debug-port checkpoints and automated smoke testing
+- polling RTL8139 Ethernet networking under QEMU
+- static IPv4, ARP, and ICMP Echo support
 
 The Linux95 boot image is attached as the primary IDE master and is treated as read-only by the kernel. A disposable QEMU test image is attached as the primary IDE slave and is the only writable disk in this milestone.
 
@@ -84,6 +86,8 @@ Linux95 remains a legacy BIOS/VBE project for this milestone.
 - `ls [path]`
 - `cat <path>`
 - `uptime`
+- `ip`
+- `ping <IPv4 address>`
 - `reboot`
 
 `mem` reports E820 information, physical page counts, page size, HHDM base, CR3, and heap usage.
@@ -95,6 +99,27 @@ Linux95 remains a legacy BIOS/VBE project for this milestone.
 `ls [path]` opens directories through the read-only VFS and lists DOS 8.3 entries one at a time with `readdir`. `ls` with no path lists `/`.
 
 `cat <path>` opens and reads files through VFS file descriptors in bounded chunks. Examples include `cat README.TXT` and `cat DOCS/KERNEL.TXT`.
+
+## Networking
+
+This milestone supports QEMU's emulated RTL8139 adapter using a polling-only driver. Both `make run` and `make run-debug` configure QEMU with:
+
+```text
+-netdev user,id=net0
+-device rtl8139,netdev=net0
+```
+
+The interface uses a fixed configuration:
+
+- IPv4 address: `10.0.2.15`
+- netmask: `255.255.255.0`
+- gateway: `10.0.2.2`
+
+Use `ip` to display interface state, the RTL8139 MAC address, and the static IPv4 configuration. Use `ping <IPv4 address>` to start an asynchronous ICMP Echo request; for example, `ping 10.0.2.2` reaches QEMU's user-network gateway without blocking the desktop loop.
+
+The QEMU smoke build enables `LINUX95_QEMU_NETWORK_SELF_TEST` in a separate test-only kernel image. Normal builds never ping automatically. The automated test also boots a second mode without RTL8139 and verifies that the desktop still starts offline.
+
+Networking is intentionally limited to RTL8139/QEMU, Ethernet II, ARP, static IPv4, and ICMP Echo. DHCP, DNS, TCP, IPv6, Wi-Fi, and general socket APIs are not implemented yet.
 
 ## Build and verify
 
@@ -118,7 +143,7 @@ make test
 make test-qemu
 ```
 
-`make test-qemu` recreates `build/linux95-storage-test.img` as a deterministic 64 MiB FAT32 superfloppy before booting QEMU.
+`make test-qemu` recreates `build/linux95-storage-test.img` as a deterministic 64 MiB FAT32 superfloppy, proves a real RTL8139 ARP/ICMP exchange, and then proves desktop boot without a network device.
 
 For a visible QEMU window:
 
@@ -155,7 +180,7 @@ The automated QEMU test requires the memory checkpoints plus these storage check
 
 ## Scope
 
-This is still a small standalone experimental kernel. The VFS and FAT32 layers are intentionally read-only, use DOS 8.3 names, and do not provide a current-working-directory or `chdir` model. The VFS exposes no write/create/delete API. It does **not** include writable FAT operations, long file names, partition parsing, AHCI, DMA, IRQ-driven ATA, NVMe, USB storage, networking, audio, SMP, user mode, processes, or a graphical desktop.
+This is still a small standalone experimental kernel. The VFS and FAT32 layers are intentionally read-only, use DOS 8.3 names, and do not provide a current-working-directory or `chdir` model. The VFS exposes no write/create/delete API. It does **not** include writable FAT operations, long file names, partition parsing, AHCI, IRQ-driven ATA, NVMe, USB networking, DHCP, DNS, TCP, Wi-Fi, audio, SMP, user mode, or processes.
 
 It is not Linux ABI compatible and is separate from the Debian-based Linux95 distribution.
 

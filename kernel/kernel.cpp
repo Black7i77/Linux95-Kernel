@@ -16,7 +16,9 @@
 #include "memory/physical.hpp"
 #include "memory/self_test.hpp"
 #include "memory/virtual.hpp"
+#include "net/network.hpp"
 #include "panic/panic.hpp"
+#include "pci/pci.hpp"
 #include "filesystem/filesystem.hpp"
 #include "filesystem/filesystem_self_test.hpp"
 #include "filesystem/vfs.hpp"
@@ -163,6 +165,11 @@ extern "C" [[noreturn]] void linux95_higher_half_entry(
         panic::halt("VFS self-test failed");
     }
 
+    debug::write("[PASS] pci_bus_ready\n");
+    if (!network::initialize()) {
+        debug::write("[WARN] network_offline\n");
+    }
+
     interrupts::initialize();
     pic::initialize();
     pit::initialize(100);
@@ -182,6 +189,11 @@ extern "C" [[noreturn]] void linux95_higher_half_entry(
     }
 
     io::enable_interrupts();
+
+#ifdef LINUX95_QEMU_NETWORK_SELF_TEST
+    (void)network::start_ping(
+        net::Ipv4Address{{10, 0, 2, 2}});
+#endif
 
     if (framebuffer_result ==
         graphics::FramebufferInitResult::Unavailable) {

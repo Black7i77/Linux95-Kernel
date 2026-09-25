@@ -8,6 +8,7 @@
 #include "memory/heap.hpp"
 #include "memory/memory.hpp"
 #include "memory/physical.hpp"
+#include "net/network.hpp"
 #include "filesystem/filesystem.hpp"
 #include "filesystem/vfs.hpp"
 #include "storage/disk.hpp"
@@ -85,6 +86,8 @@ void print_help(terminal::Output& output)
     terminal::write(output, "  ls [path] List FAT32 directory\n");
     terminal::write(output, "  cat <path> Read FAT32 file\n");
     terminal::write(output, "  uptime   Show uptime in seconds\n");
+    terminal::write(output, "  ip       Show network configuration\n");
+    terminal::write(output, "  ping <IPv4 address> Send ICMP Echo Request\n");
     terminal::write(output, "  reboot   Reboot the machine\n");
 }
 
@@ -470,6 +473,26 @@ void execute_command(
 
 namespace {
 
+network::Status network_status(void*)
+{
+    return network::status();
+}
+
+bool network_start_ping(void*, net::Ipv4Address destination)
+{
+    return network::start_ping(destination);
+}
+
+net::icmp::PingResult network_ping_result(void*)
+{
+    return network::ping_result();
+}
+
+void network_clear_ping_result(void*)
+{
+    network::clear_ping_result();
+}
+
 void execute_session_command(
     void*,
     terminal::Output& output,
@@ -487,14 +510,26 @@ void execute_session_command(
     terminal::Output output =
         terminal::make_vga_output();
 
+    terminal::NetworkCallbacks network_callbacks{
+        nullptr,
+        network_status,
+        network_start_ping,
+        network_ping_result,
+        network_clear_ping_result,
+    };
+
     terminal::ShellSession session(
         output,
         nullptr,
-        execute_session_command);
+        execute_session_command,
+        &network_callbacks);
 
     session.begin();
 
     for (;;) {
+        network::poll();
+        (void)session.poll();
+
         if (!keyboard::has_char()) {
             io::halt();
             continue;

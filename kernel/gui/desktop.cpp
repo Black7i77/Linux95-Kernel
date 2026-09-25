@@ -7,6 +7,7 @@
 #include "arch/pit.hpp"
 #include "gui/system_info_app.hpp"
 #include "gui/terminal_app.hpp"
+#include "net/network.hpp"
 
 namespace linux95::desktop {
 namespace {
@@ -1777,6 +1778,14 @@ graphics::Rect DirtyRegionQueue::rect(
 
     for (;;) {
         bool had_event = false;
+
+        network::poll();
+        if (state.terminal_app.poll()) {
+            invalidate_window(
+                state,
+                kTerminalWindowId);
+            had_event = true;
+        }
 
         if (state.mouse_online) {
             while (mouse::has_event()) {
