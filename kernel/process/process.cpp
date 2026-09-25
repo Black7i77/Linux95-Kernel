@@ -1,4 +1,5 @@
 #include "process/process.hpp"
+#include "arch/interrupts.hpp"
 
 #if !__STDC_HOSTED__
 #include "memory/address.hpp"
@@ -154,6 +155,33 @@ size_t capacity() {
 
 Process* table() {
     return g_processes;
+}
+
+void capture_interrupt_context(
+    Process& process,
+    const interrupts::InterruptFrame& frame)
+{
+    process.context.r15 = frame.r15;
+    process.context.r14 = frame.r14;
+    process.context.r13 = frame.r13;
+    process.context.r12 = frame.r12;
+    process.context.r11 = frame.r11;
+    process.context.r10 = frame.r10;
+    process.context.r9 = frame.r9;
+    process.context.r8 = frame.r8;
+    process.context.rbp = frame.rbp;
+    process.context.rdi = frame.rdi;
+    process.context.rsi = frame.rsi;
+    process.context.rdx = frame.rdx;
+    process.context.rcx = frame.rcx;
+    process.context.rbx = frame.rbx;
+    process.context.rax = frame.rax;
+    process.context.rip = frame.rip;
+    process.context.rsp = frame.rsp;
+    process.context.rflags = frame.rflags;
+    process.context.cs = static_cast<uint16_t>(frame.cs);
+    process.context.ss = static_cast<uint16_t>(frame.ss);
+    process.context.return_kind = ReturnKind::Iret;
 }
 
 void mark_exited(Process& process, int64_t code) {

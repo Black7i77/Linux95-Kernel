@@ -23,6 +23,7 @@ KERNEL_SECTORS := 256
 IMAGE_SECTORS := 273
 STORAGE_TEST_IMAGE := $(BUILD)/linux95-storage-test.img
 FAULT_TEST_IMAGE := $(BUILD)/linux95-fault-test.img
+PREEMPTION_TEST_IMAGE := $(BUILD)/linux95-preemption-test.img
 
 HOST_CXXFLAGS := -std=c++17 -Wall -Wextra -Werror -O2 -Ikernel
 
@@ -130,6 +131,12 @@ $(BUILD)/user/init.o: user/init/main.cpp user/include/linux95_syscall.hpp | $(BU
 $(BUILD)/user/worker.o: user/worker/main.cpp user/include/linux95_syscall.hpp | $(BUILD)/user
 >$(CXX) $(USER_CXXFLAGS) -c $< -o $@
 
+$(BUILD)/user/preempt_hog.o: user/preempt_hog/main.cpp user/include/linux95_syscall.hpp | $(BUILD)/user
+>$(CXX) $(USER_CXXFLAGS) -c $< -o $@
+
+$(BUILD)/user/preempt_worker.o: user/preempt_worker/main.cpp user/include/linux95_syscall.hpp | $(BUILD)/user
+>$(CXX) $(USER_CXXFLAGS) -c $< -o $@
+
 $(BUILD)/user/fault.o: user/fault/main.cpp | $(BUILD)/user
 >$(CXX) $(USER_CXXFLAGS) -c $< -o $@
 
@@ -138,6 +145,12 @@ $(BUILD)/user/init.elf: $(BUILD)/user/start.o $(BUILD)/user/init.o user/user.ld
 
 $(BUILD)/user/worker.elf: $(BUILD)/user/start.o $(BUILD)/user/worker.o user/user.ld
 >$(LD) -nostdlib -static -no-pie -z max-page-size=0x1000 -T user/user.ld -o $@ $(BUILD)/user/start.o $(BUILD)/user/worker.o
+
+$(BUILD)/user/preempt_hog.elf: $(BUILD)/user/start.o $(BUILD)/user/preempt_hog.o user/user.ld
+>$(LD) -nostdlib -static -no-pie -z max-page-size=0x1000 -T user/user.ld -o $@ $(BUILD)/user/start.o $(BUILD)/user/preempt_hog.o
+
+$(BUILD)/user/preempt_worker.elf: $(BUILD)/user/start.o $(BUILD)/user/preempt_worker.o user/user.ld
+>$(LD) -nostdlib -static -no-pie -z max-page-size=0x1000 -T user/user.ld -o $@ $(BUILD)/user/start.o $(BUILD)/user/preempt_worker.o
 
 $(BUILD)/user/fault.elf: $(BUILD)/user/start.o $(BUILD)/user/fault.o user/user.ld
 >$(LD) -nostdlib -static -no-pie -z max-page-size=0x1000 -T user/user.ld -o $@ $(BUILD)/user/start.o $(BUILD)/user/fault.o
@@ -560,6 +573,9 @@ done
 $(FAULT_TEST_IMAGE): tests/prepare_fat32_image.py $(BUILD)/user/fault.elf $(BUILD)/user/worker.elf | $(BUILD)
 >$(PYTHON) tests/prepare_fat32_image.py $@ --process-fault
 
+$(PREEMPTION_TEST_IMAGE): tests/prepare_fat32_image.py $(BUILD)/user/preempt_hog.elf $(BUILD)/user/preempt_worker.elf | $(BUILD)
+>$(PYTHON) tests/prepare_fat32_image.py $@ --process-preemption
+
 prepare-storage-test-image: $(STORAGE_TEST_IMAGE)
 
 test-memory-source:
@@ -574,6 +590,11 @@ test-storage-source:
 test-filesystem-source:
 >$(PYTHON) tests/filesystem_source_checks.py
 
+.PHONY: test-preemption-source
+test-preemption-source:
+>$(PYTHON) tests/preemption_source_checks.py
+
+test: test-preemption-source
 test: all test-host-memory test-host-storage test-host-heap test-host-segments test-host-process test-host-scheduler test-host-user-space test-host-elf test-host-elf-loader-plan test-host-syscall test-host-filesystem test-host-graphics test-host-pci test-host-rtl8139-helpers test-host-kernel-virtual-to-physical test-host-ethernet test-host-arp test-host-ipv4 test-host-icmp
 >$(PYTHON) tests/source_checks.py
 >$(PYTHON) tests/image_checks.py
@@ -586,6 +607,7 @@ test-qemu: all $(NETWORK_TEST_IMAGE) prepare-storage-test-image
 >@command -v $(QEMU) >/dev/null || { echo "Missing tool: $(QEMU)"; exit 1; }
 >$(PYTHON) tests/qemu_smoke.py
 >$(PYTHON) tests/qemu_smoke.py --without-network
+>$(PYTHON) tests/qemu_smoke.py --process-preemption-test
 
 run: all prepare-storage-test-image
 >$(QEMU) \

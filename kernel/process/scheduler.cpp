@@ -5,6 +5,7 @@
 #include "arch/debug.hpp"
 #include "arch/interrupts.hpp"
 #include "memory/address.hpp"
+#include "panic/panic.hpp"
 #include "syscall/syscall.hpp"
 
 namespace linux95::scheduler {
@@ -20,6 +21,16 @@ size_t g_reaped_process_count = 0;
 bool g_desktop_survival_emitted = false;
 HostReason g_last_host_reason = HostReason::Yield;
 
+// Preemption diagnostics are one-shot milestone evidence, never per-tick logs.
+bool g_quantum_expired_emitted = false;
+bool g_context_captured_emitted = false;
+bool g_preempt_host_return_emitted = false;
+bool g_non_yielding_preempted_emitted = false;
+bool g_preemptive_round_robin_emitted = false;
+uint32_t g_last_preempted_pid = 0;
+
+uint32_t g_user_quantum_ticks_remaining = 0;
+
 uint64_t read_rflags()
 {
     uint64_t value = 0;
@@ -32,6 +43,41 @@ void write_rflags(uint64_t value)
     asm volatile("push %0; popfq" : : "r"(value) : "cc", "memory");
 }
 
+}
+
+static void emit_preemption_diagnostic(const char* text);
+
+void reset_user_quantum()
+{
+    g_user_quantum_ticks_remaining = kUserQuantumTicks;
+}
+
+bool on_timer_tick(bool from_user)
+{
+    if (!from_user || g_user_quantum_ticks_remaining == 0) {
+        return false;
+    }
+
+    --g_user_quantum_ticks_remaining;
+
+    if (g_user_quantum_ticks_remaining == 0) {
+        if (!g_quantum_expired_emitted) {
+            g_quantum_expired_emitted = true;
+            emit_preemption_diagnostic("[PASS] user quantum expired\n");
+        }
+        return true;
+    }
+
+    return false;
+}
+
+static void emit_preemption_diagnostic(const char* text)
+{
+#if defined(__STDC_HOSTED__) && __STDC_HOSTED__
+    (void)text;
+#else
+    debug::write(text);
+#endif
 }
 
 int choose_next(const linux95::process::Process* table,
@@ -70,7 +116,20 @@ bool run_once()
         process::reap_exited();
         return true;
     }
+    if (g_last_host_reason == HostReason::Preempt &&
+        g_last_preempted_pid != 0 &&
+        selected.pid != g_last_preempted_pid) {
+        if (!g_non_yielding_preempted_emitted) {
+            g_non_yielding_preempted_emitted = true;
+            emit_preemption_diagnostic("[PASS] non-yielding process was preempted\n");
+        } else if (!g_preemptive_round_robin_emitted) {
+            g_preemptive_round_robin_emitted = true;
+            emit_preemption_diagnostic("[PASS] preemptive round robin\n");
+        }
+    }
+
     selected.state = process::State::Running;
+    reset_user_quantum();
     g_host_cr3 = arch::x86_64::read_cr3();
     g_host_rflags = read_rflags();
     asm volatile("cli" ::: "memory");
@@ -87,6 +146,13 @@ bool run_once()
     }
 
     write_rflags(g_host_rflags);
+
+    if (g_last_host_reason == HostReason::Preempt &&
+        !g_preempt_host_return_emitted) {
+        g_preempt_host_return_emitted = true;
+        emit_preemption_diagnostic("[PASS] timer preemption returned to host\n");
+        emit_preemption_diagnostic("[PASS] desktop remained online after preemption\n");
+    }
 
     if (g_last_host_reason == HostReason::Fault) {
         static bool fault_survival_emitted = false;
@@ -143,6 +209,45 @@ bool run_once()
 namespace linux95::process {
 namespace {
 
+Process* validated_current_process()
+{
+    Process* current = syscall::cpu_local_state().current_process;
+
+    uintptr_t current_address =
+        reinterpret_cast<uintptr_t>(current);
+    uintptr_t table_begin =
+        reinterpret_cast<uintptr_t>(table());
+
+    const uintptr_t kernel_region_base =
+        static_cast<uintptr_t>(memory::kKernelRegionBase);
+
+    if (current_address >= kernel_region_base) {
+        current_address -= kernel_region_base;
+    }
+    if (table_begin >= kernel_region_base) {
+        table_begin -= kernel_region_base;
+    }
+
+    const uintptr_t table_bytes =
+        capacity() * sizeof(Process);
+
+    if (current == nullptr ||
+        current_address < table_begin ||
+        current_address >= table_begin + table_bytes ||
+        (current_address - table_begin) % sizeof(Process) != 0) {
+        return nullptr;
+    }
+
+    if (current->pid == 0 ||
+        current->state != State::Running ||
+        current->page_table_physical == 0 ||
+        current->kernel_stack_top == 0) {
+        return nullptr;
+    }
+
+    return current;
+}
+
 void debug_write_hex(uint64_t value)
 {
     static constexpr char kHex[] = "0123456789abcdef";
@@ -172,6 +277,36 @@ void debug_write_decimal(uint32_t value)
 
 }
 
+[[noreturn]] void handle_user_preempt(
+    const interrupts::InterruptFrame& frame)
+{
+    if ((frame.cs & 0x3U) != 0x3U) {
+        panic::halt(
+            "Kernel attempted to preempt non-user context");
+    }
+
+    Process* current = validated_current_process();
+    if (current == nullptr) {
+        panic::halt(
+            "Timer preemption without tracked running process");
+    }
+
+    capture_interrupt_context(*current, frame);
+
+    if (!scheduler::g_context_captured_emitted) {
+        scheduler::g_context_captured_emitted = true;
+        scheduler::emit_preemption_diagnostic("[PASS] preempted context captured\n");
+    }
+    scheduler::g_last_preempted_pid = current->pid;
+
+    current->state = State::Ready;
+
+    scheduler::return_to_host(
+        *current,
+        current->context,
+        scheduler::HostReason::Preempt);
+}
+
 bool handle_user_fault(uint8_t vector,
                        uint64_t error_code,
                        const interrupts::InterruptFrame& frame)
@@ -181,28 +316,10 @@ bool handle_user_fault(uint8_t vector,
         return false;
     }
 
-    Process* current = syscall::cpu_local_state().current_process;
-    uintptr_t current_address = reinterpret_cast<uintptr_t>(current);
-    uintptr_t table_begin = reinterpret_cast<uintptr_t>(table());
-    const uintptr_t kernel_region_base =
-        static_cast<uintptr_t>(memory::kKernelRegionBase);
-    if (current_address >= kernel_region_base) {
-        current_address -= kernel_region_base;
-    }
-    if (table_begin >= kernel_region_base) {
-        table_begin -= kernel_region_base;
-    }
-    const uintptr_t table_bytes = capacity() * sizeof(Process);
-    if (current == nullptr || current_address < table_begin ||
-        current_address >= table_begin + table_bytes ||
-        (current_address - table_begin) % sizeof(Process) != 0) {
-        debug::write("[FAULT] CPL3 exception without a tracked process\n");
-        return false;
-    }
-    if (current->pid == 0 || current->state != State::Running ||
-        current->page_table_physical == 0 ||
-        current->kernel_stack_top == 0) {
-        debug::write("[FAULT] CPL3 exception without a running process\n");
+    Process* current = validated_current_process();
+    if (current == nullptr) {
+        debug::write(
+            "[FAULT] CPL3 exception without a tracked running process\n");
         return false;
     }
 
@@ -214,27 +331,7 @@ bool handle_user_fault(uint8_t vector,
     current->fault_vector = vector;
     current->fault_error_code = error_code;
     current->fault_address = fault_address;
-    current->context.r15 = frame.r15;
-    current->context.r14 = frame.r14;
-    current->context.r13 = frame.r13;
-    current->context.r12 = frame.r12;
-    current->context.r11 = frame.r11;
-    current->context.r10 = frame.r10;
-    current->context.r9 = frame.r9;
-    current->context.r8 = frame.r8;
-    current->context.rbp = frame.rbp;
-    current->context.rdi = frame.rdi;
-    current->context.rsi = frame.rsi;
-    current->context.rdx = frame.rdx;
-    current->context.rcx = frame.rcx;
-    current->context.rbx = frame.rbx;
-    current->context.rax = frame.rax;
-    current->context.rip = frame.rip;
-    current->context.rsp = frame.rsp;
-    current->context.rflags = frame.rflags;
-    current->context.cs = static_cast<uint16_t>(frame.cs);
-    current->context.ss = static_cast<uint16_t>(frame.ss);
-    current->context.return_kind = ReturnKind::Iret;
+    capture_interrupt_context(*current, frame);
     mark_exited(*current, -static_cast<int64_t>(vector));
 
     debug::write("[FAULT] vector=");

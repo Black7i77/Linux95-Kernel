@@ -56,9 +56,15 @@ void release(Process& process);
 size_t capacity();
 Process* table();
 void mark_exited(Process& process, int64_t code);
+void capture_interrupt_context(
+    Process& process,
+    const interrupts::InterruptFrame& frame);
 void reap_exited();
 void reap_one_for_test(Process& process);
 void reap_one_for_test(Process& process, const ReapOperations& operations);
+[[noreturn]] void handle_user_preempt(
+    const interrupts::InterruptFrame& frame);
+
 bool handle_user_fault(uint8_t vector,
                        uint64_t error_code,
                        const interrupts::InterruptFrame& frame);

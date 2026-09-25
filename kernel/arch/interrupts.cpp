@@ -7,6 +7,7 @@
 #include "arch/x86_64/segments.hpp"
 #include "panic/panic.hpp"
 #include "process/process.hpp"
+#include "process/scheduler.hpp"
 
 #include <stddef.h>
 #include <stdint.h>
@@ -111,7 +112,17 @@ extern "C" void interrupt_dispatch(
 
     if (frame->vector == 32) {
         pit::on_irq();
+
+        const bool from_user =
+            (frame->cs & 0x3U) == 0x3U;
+        const bool expired =
+            scheduler::on_timer_tick(from_user);
+
         pic::send_eoi(0);
+
+        if (expired) {
+            process::handle_user_preempt(*frame);
+        }
         return;
     }
 

@@ -1,6 +1,7 @@
 #include <cassert>
 #include <cstddef>
 #include "process/process.hpp"
+#include "arch/interrupts.hpp"
 
 namespace {
 
@@ -154,6 +155,53 @@ int main() {
     reap_one_for_test(owned, operations);
     assert(cleanup.released_count == 11);
     assert(cleanup.destroy_count == 1);
+
+    linux95::interrupts::InterruptFrame frame{};
+    frame.r15 = 0x15;
+    frame.r14 = 0x14;
+    frame.r13 = 0x13;
+    frame.r12 = 0x12;
+    frame.r11 = 0x11;
+    frame.r10 = 0x10;
+    frame.r9 = 0x09;
+    frame.r8 = 0x08;
+    frame.rbp = 0x70;
+    frame.rdi = 0x71;
+    frame.rsi = 0x72;
+    frame.rdx = 0x73;
+    frame.rcx = 0x74;
+    frame.rbx = 0x75;
+    frame.rax = 0x76;
+    frame.rip = 0x0000400000001234ULL;
+    frame.rsp = 0x00007FFFFFEFF000ULL;
+    frame.rflags = 0x202;
+    frame.cs = 0x23;
+    frame.ss = 0x1B;
+
+    Process captured{};
+    capture_interrupt_context(captured, frame);
+
+    assert(captured.context.r15 == frame.r15);
+    assert(captured.context.r14 == frame.r14);
+    assert(captured.context.r13 == frame.r13);
+    assert(captured.context.r12 == frame.r12);
+    assert(captured.context.r11 == frame.r11);
+    assert(captured.context.r10 == frame.r10);
+    assert(captured.context.r9 == frame.r9);
+    assert(captured.context.r8 == frame.r8);
+    assert(captured.context.rbp == frame.rbp);
+    assert(captured.context.rdi == frame.rdi);
+    assert(captured.context.rsi == frame.rsi);
+    assert(captured.context.rdx == frame.rdx);
+    assert(captured.context.rcx == frame.rcx);
+    assert(captured.context.rbx == frame.rbx);
+    assert(captured.context.rax == frame.rax);
+    assert(captured.context.rip == frame.rip);
+    assert(captured.context.rsp == frame.rsp);
+    assert(captured.context.rflags == frame.rflags);
+    assert(captured.context.cs == frame.cs);
+    assert(captured.context.ss == frame.ss);
+    assert(captured.context.return_kind == ReturnKind::Iret);
 
     return 0;
 }
