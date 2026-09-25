@@ -61,6 +61,7 @@ KERNEL_OBJS := \
 	$(BUILD)/mouse.o \
 	$(BUILD)/pci.o \
 	$(BUILD)/rtl8139.o \
+	$(BUILD)/ethernet.o \
 	$(BUILD)/memory.o \
 	$(BUILD)/virtual.o \
 	$(BUILD)/physical.o \
@@ -77,7 +78,7 @@ KERNEL_OBJS := \
 	$(BUILD)/vfs_self_test.o \
 	$(BUILD)/shell.o
 
-.PHONY: all clean run run-debug test test-qemu prepare-storage-test-image test-host-memory test-host-storage test-host-filesystem test-host-graphics test-host-pci test-host-rtl8139-helpers test-host-kernel-virtual-to-physical test-memory-source test-storage-source test-relocations check-tools
+.PHONY: all clean run run-debug test test-qemu prepare-storage-test-image test-host-memory test-host-storage test-host-filesystem test-host-graphics test-host-pci test-host-rtl8139-helpers test-host-kernel-virtual-to-physical test-host-ethernet test-memory-source test-storage-source test-relocations check-tools
 
 all: check-tools $(BUILD)/linux95-kernel.img
 
@@ -183,6 +184,9 @@ $(BUILD)/pci.o: kernel/pci/pci.cpp kernel/pci/pci.hpp | $(BUILD)
 $(BUILD)/rtl8139.o: kernel/drivers/rtl8139.cpp kernel/drivers/rtl8139.hpp kernel/drivers/rtl8139_helpers.hpp kernel/memory/memory.hpp kernel/pci/pci.hpp | $(BUILD)
 >$(CXX) $(CXXFLAGS) -c $< -o $@
 
+$(BUILD)/ethernet.o: kernel/net/ethernet.cpp kernel/net/ethernet.hpp kernel/net/net_types.hpp | $(BUILD)
+>$(CXX) $(CXXFLAGS) -c $< -o $@
+
 
 $(BUILD)/memory.o: kernel/memory/memory.cpp kernel/memory/memory.hpp kernel/memory/address.hpp kernel/boot_info.hpp | $(BUILD)
 >$(CXX) $(CXXFLAGS) -c $< -o $@
@@ -227,6 +231,12 @@ $(BUILD)/host-kernel-virtual-to-physical-test: tests/host/kernel_virtual_to_phys
 
 test-host-kernel-virtual-to-physical: $(BUILD)/host-kernel-virtual-to-physical-test
 >$(BUILD)/host-kernel-virtual-to-physical-test
+
+$(BUILD)/host-ethernet-test: tests/host/ethernet_test.cpp kernel/net/ethernet.cpp kernel/net/ethernet.hpp kernel/net/net_types.hpp | $(BUILD)
+>$(CXX) $(HOST_CXXFLAGS) tests/host/ethernet_test.cpp kernel/net/ethernet.cpp -o $@
+
+test-host-ethernet: $(BUILD)/host-ethernet-test
+>$(BUILD)/host-ethernet-test
 
 $(BUILD)/host-ata-helpers-test: tests/host/ata_helpers_test.cpp | $(BUILD)
 >$(CXX) $(HOST_CXXFLAGS) $< -o $@
@@ -357,7 +367,7 @@ test-storage-source:
 test-filesystem-source:
 >$(PYTHON) tests/filesystem_source_checks.py
 
-test: all test-host-memory test-host-storage test-host-filesystem test-host-graphics test-host-pci test-host-rtl8139-helpers test-host-kernel-virtual-to-physical
+test: all test-host-memory test-host-storage test-host-filesystem test-host-graphics test-host-pci test-host-rtl8139-helpers test-host-kernel-virtual-to-physical test-host-ethernet
 >$(PYTHON) tests/source_checks.py
 >$(PYTHON) tests/image_checks.py
 >$(PYTHON) tests/memory_source_checks.py
