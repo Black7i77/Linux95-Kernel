@@ -19,6 +19,7 @@
 #include "memory/self_test.hpp"
 #include "memory/virtual.hpp"
 #include "process/process.hpp"
+#include "syscall/syscall.hpp"
 #include "user/elf.hpp"
 #include "net/network.hpp"
 #include "panic/panic.hpp"
@@ -32,6 +33,54 @@
 #include "terminal/vga.hpp"
 
 #include <stdint.h>
+
+namespace {
+
+void write_decimal(uint32_t value)
+{
+    char digits[10];
+    size_t count = 0;
+    do {
+        digits[count++] = static_cast<char>('0' + value % 10);
+        value /= 10;
+    } while (value != 0 && count < sizeof(digits));
+    while (count != 0) {
+        const char digit[] = {digits[--count], '\0'};
+        linux95::debug::write(digit);
+    }
+}
+
+void log_user_image_failure(const char* path,
+                            linux95::user::ElfStatus status)
+{
+    linux95::debug::write("[WARN] user image load failed: ");
+    linux95::debug::write(path);
+    linux95::debug::write(" status=");
+    write_decimal(static_cast<uint32_t>(status));
+    linux95::debug::write("\n");
+}
+
+void discard_startup_processes()
+{
+    using namespace linux95;
+
+    // Startup runs before scheduler::run_once(), so the host CR3 and host
+    // stack are still active. Reuse the normal Task 10 reaper for any image
+    // that completed before a later startup step failed.
+    syscall::set_cpu_process(nullptr, 0);
+    arch::x86_64::set_tss_rsp0(0);
+    process::Process* const table = process::table();
+    if (table != nullptr) {
+        for (size_t index = 0; index < process::capacity(); ++index) {
+            if (table[index].state != process::State::Unused) {
+                process::mark_exited(table[index], -1);
+            }
+        }
+    }
+    process::reap_exited();
+}
+
+}
 
 extern "C" [[noreturn]] void linux95_reload_cr3_and_reenter(
     uint64_t new_cr3,
@@ -172,20 +221,49 @@ extern "C" [[noreturn]] void linux95_higher_half_entry(
     process::initialize();
     debug::write("[PASS] process subsystem initialized\n");
 
-    process::Process* pid1 = process::allocate();
-    if (pid1 != nullptr &&
-        user::load_process_image("/USER/INIT.ELF", *pid1) == user::ElfStatus::Ok) {
-        debug::write("[PASS] pid1 ELF loaded\n");
-    } else if (pid1 != nullptr) {
-        process::release(*pid1);
+    bool user_processes_online =
+        process::table() != nullptr && process::capacity() == 16;
+    if (!user_processes_online) {
+        debug::write("[WARN] process table initialization failed\n");
     }
 
-    process::Process* pid2 = process::allocate();
-    if (pid2 != nullptr &&
-        user::load_process_image("/USER/WORKER.ELF", *pid2) == user::ElfStatus::Ok) {
-        debug::write("[PASS] pid2 ELF loaded\n");
-    } else if (pid2 != nullptr) {
-        process::release(*pid2);
+    if (user_processes_online) {
+        process::Process* const pid1 = process::allocate();
+        if (pid1 == nullptr) {
+            debug::write("[WARN] could not allocate PID1 process slot\n");
+            user_processes_online = false;
+        } else {
+            const user::ElfStatus status =
+                user::load_process_image("/USER/INIT.ELF", *pid1);
+            if (status == user::ElfStatus::Ok) {
+                debug::write("[PASS] pid1 ELF loaded\n");
+            } else {
+                log_user_image_failure("/USER/INIT.ELF", status);
+                user_processes_online = false;
+            }
+        }
+    }
+
+    if (user_processes_online) {
+        process::Process* const pid2 = process::allocate();
+        if (pid2 == nullptr) {
+            debug::write("[WARN] could not allocate PID2 process slot\n");
+            user_processes_online = false;
+        } else {
+            const user::ElfStatus status =
+                user::load_process_image("/USER/WORKER.ELF", *pid2);
+            if (status == user::ElfStatus::Ok) {
+                debug::write("[PASS] pid2 ELF loaded\n");
+            } else {
+                log_user_image_failure("/USER/WORKER.ELF", status);
+                user_processes_online = false;
+            }
+        }
+    }
+
+    if (!user_processes_online) {
+        discard_startup_processes();
+        debug::write("[WARN] user_processes_offline\n");
     }
 
     debug::write("[PASS] pci_bus_ready\n");

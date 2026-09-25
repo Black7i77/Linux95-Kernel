@@ -4,6 +4,8 @@
 #include "memory/address.hpp"
 #include "memory/physical.hpp"
 #include "memory/user_space.hpp"
+#include "arch/x86_64/tss.hpp"
+#include "syscall/syscall.hpp"
 #endif
 
 namespace linux95::process {
@@ -161,6 +163,11 @@ void mark_exited(Process& process, int64_t code) {
 
 void reap_exited() {
 #if !__STDC_HOSTED__
+    // This routine is called only after control has returned to the host
+    // stack and CR3. Clear privilege-transition stack pointers before any
+    // exited process kernel stack can be released.
+    syscall::set_cpu_process(nullptr, 0);
+    arch::x86_64::set_tss_rsp0(0);
     const ReapOperations operations{
         nullptr,
         lookup_user_page,

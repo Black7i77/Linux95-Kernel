@@ -75,6 +75,24 @@ The graphical boot path reports `[PASS] framebuffer_mapped`, `[PASS] renderer_on
 
 Linux95 remains a legacy BIOS/VBE project for this milestone.
 
+## Experimental userspace
+
+Linux95 experimentally supports static ELF64 x86_64 processes in Ring 3.
+Each process has a separate user address space and participates in bounded,
+cooperative round-robin scheduling from the desktop host. The initial syscall
+set provides `write`, `yield`, and `exit` through both `int 0x80` and the
+x86_64 `syscall`/`sysretq` path. Fatal user exceptions are isolated to the
+offending process.
+
+Initial user-process startup is non-fatal. If the initial user programs are
+missing or safely rejected, Linux95 reports userspace offline and continues
+to the desktop with storage, input, and otherwise-healthy networking
+available.
+
+This is not a general-purpose process environment. It has no preemption,
+`fork`/`clone`, threads, dynamic linking, shared libraries, or full POSIX
+compatibility.
+
 ## Shell commands
 
 - `help`
@@ -118,6 +136,10 @@ The interface uses a fixed configuration:
 Use `ip` to display interface state, the RTL8139 MAC address, and the static IPv4 configuration. Use `ping <IPv4 address>` to start an asynchronous ICMP Echo request; for example, `ping 10.0.2.2` reaches QEMU's user-network gateway without blocking the desktop loop.
 
 The QEMU smoke build enables `LINUX95_QEMU_NETWORK_SELF_TEST` in a separate test-only kernel image. Normal builds never ping automatically. The automated test also boots a second mode without RTL8139 and verifies that the desktop still starts offline.
+
+The process-focused QEMU tests also cover two-process cooperative execution,
+user-fault isolation, and desktop startup with `/USER/INIT.ELF` and
+`/USER/WORKER.ELF` deliberately absent from the FAT fixture.
 
 Networking is intentionally limited to RTL8139/QEMU, Ethernet II, ARP, static IPv4, and ICMP Echo. DHCP, DNS, TCP, IPv6, Wi-Fi, and general socket APIs are not implemented yet.
 
@@ -180,7 +202,7 @@ The automated QEMU test requires the memory checkpoints plus these storage check
 
 ## Scope
 
-This is still a small standalone experimental kernel. The VFS and FAT32 layers are intentionally read-only, use DOS 8.3 names, and do not provide a current-working-directory or `chdir` model. The VFS exposes no write/create/delete API. It does **not** include writable FAT operations, long file names, partition parsing, AHCI, IRQ-driven ATA, NVMe, USB networking, DHCP, DNS, TCP, Wi-Fi, audio, SMP, user mode, or processes.
+This is still a small standalone experimental kernel. The VFS and FAT32 layers are intentionally read-only, use DOS 8.3 names, and do not provide a current-working-directory or `chdir` model. The VFS exposes no write/create/delete API. It does **not** include writable FAT operations, long file names, partition parsing, AHCI, IRQ-driven ATA, NVMe, USB networking, DHCP, DNS, TCP, Wi-Fi, audio, SMP, preemptive process scheduling, threads, dynamic linking, shared libraries, or full POSIX compatibility.
 
 It is not Linux ABI compatible and is separate from the Debian-based Linux95 distribution.
 

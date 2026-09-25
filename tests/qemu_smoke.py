@@ -9,25 +9,28 @@ import time
 WITHOUT_NETWORK = "--without-network" in sys.argv[1:]
 PROCESS_SELF_TEST = "--process-self-test" in sys.argv[1:]
 PROCESS_FAULT_TEST = "--process-fault-test" in sys.argv[1:]
+WITHOUT_USER_PROGRAMS = "--without-user-programs" in sys.argv[1:]
 
-if (PROCESS_SELF_TEST and PROCESS_FAULT_TEST) or any(
+if sum((WITHOUT_NETWORK, PROCESS_SELF_TEST, PROCESS_FAULT_TEST,
+        WITHOUT_USER_PROGRAMS)) > 1 or any(
         argument not in ("--without-network", "--process-self-test",
-                         "--process-fault-test")
+                         "--process-fault-test", "--without-user-programs")
        for argument in sys.argv[1:]):
     print("usage: qemu_smoke.py [--without-network] [--process-self-test] "
-          "[--process-fault-test]")
+          "[--process-fault-test] [--without-user-programs]")
     sys.exit(2)
 
 ROOT = Path(__file__).resolve().parents[1]
 IMAGE = ROOT / "build" / (
     "linux95-kernel.img"
-    if WITHOUT_NETWORK or PROCESS_SELF_TEST or PROCESS_FAULT_TEST
+    if WITHOUT_NETWORK or PROCESS_SELF_TEST or PROCESS_FAULT_TEST or
+            WITHOUT_USER_PROGRAMS
     else "linux95-kernel-network-test.img"
 )
 STORAGE_IMAGE = ROOT / "build" / (
-    "linux95-fault-test.img"
-    if PROCESS_FAULT_TEST
-    else "linux95-storage-test.img"
+    "linux95-fault-test.img" if PROCESS_FAULT_TEST else
+    "linux95-no-user-test.img" if WITHOUT_USER_PROGRAMS else
+    "linux95-storage-test.img"
 )
 LOG = ROOT / "build" / "qemu-debug.log"
 
@@ -44,6 +47,32 @@ if PROCESS_FAULT_TEST:
         cwd=ROOT,
         check=True,
     )
+
+if WITHOUT_USER_PROGRAMS:
+    subprocess.run(
+        ["make", "all", "prepare-storage-test-image"],
+        cwd=ROOT,
+        check=True,
+    )
+    shutil.copyfile(
+        ROOT / "build" / "linux95-storage-test.img",
+        STORAGE_IMAGE,
+    )
+    for user_path in ("INIT.ELF", "WORKER.ELF"):
+        subprocess.run(
+            ["mdel", "-i", str(STORAGE_IMAGE), f"::USER/{user_path}"],
+            cwd=ROOT,
+            check=True,
+        )
+        absent = subprocess.run(
+            ["mdir", "-i", str(STORAGE_IMAGE), f"::USER/{user_path}"],
+            cwd=ROOT,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+        if absent.returncode == 0:
+            raise RuntimeError(f"{user_path} remains in no-user FAT fixture")
 
 if not IMAGE.is_file():
     print("qemu smoke test: FAIL")
@@ -95,7 +124,7 @@ completion_marker = (
     "[PASS] desktop remained online"
     if PROCESS_SELF_TEST or PROCESS_FAULT_TEST
     else ("[PASS] desktop_online"
-          if WITHOUT_NETWORK
+          if WITHOUT_NETWORK or WITHOUT_USER_PROGRAMS
           else "[PASS] icmp_echo_reply")
 )
 
@@ -109,7 +138,8 @@ try:
         if LOG.exists():
             content = LOG.read_text(errors="replace")
             if completion_marker in content:
-                if not (PROCESS_SELF_TEST or PROCESS_FAULT_TEST):
+                if not (PROCESS_SELF_TEST or PROCESS_FAULT_TEST or
+                        WITHOUT_USER_PROGRAMS):
                     saw_completion = True
                     break
                 if completion_seen_at is None:
@@ -191,6 +221,15 @@ if WITHOUT_NETWORK or PROCESS_SELF_TEST or PROCESS_FAULT_TEST:
     if ("[WARN] pci_no_rtl8139" not in content and
             "[WARN] network_offline" not in content):
         required.append("[WARN] pci_no_rtl8139 or [WARN] network_offline")
+elif WITHOUT_USER_PROGRAMS:
+    required.extend([
+        "[PASS] rtl8139_detected",
+        "[PASS] rtl8139_initialized",
+        "[PASS] ethernet_ready",
+        "[PASS] arp_ready",
+        "[PASS] ipv4_ready",
+        "[PASS] icmp_ready",
+    ])
 else:
     required.extend([
         "[PASS] rtl8139_detected",
@@ -224,6 +263,9 @@ if PROCESS_FAULT_TEST:
         "[PASS] kernel survived user fault",
         "[PASS] desktop remained online",
     ])
+
+if WITHOUT_USER_PROGRAMS:
+    required.append("[WARN] user_processes_offline")
 
 missing = [marker for marker in required if marker not in content]
 
@@ -269,7 +311,8 @@ if PROCESS_SELF_TEST:
         "[pid 2] resumed through int 0x80",
     ]
     message_positions = [content.find(message) for message in user_messages]
-    if any(position < 0 for position in message_positions) or message_positions != sorted(message_positions):
+    if (any(position < 0 for position in message_positions) or
+            message_positions != sorted(message_positions)):
         print("qemu smoke test: FAIL")
         print("user messages did not appear in required round-robin order")
         print("--- debug log ---")
@@ -292,6 +335,17 @@ if PROCESS_SELF_TEST:
     if message_positions[-1] > content.find("[PASS] pid2 exited"):
         print("qemu smoke test: FAIL")
         print("user output continued after process exit")
+        print("--- debug log ---")
+        print(content or "(empty)")
+        sys.exit(1)
+
+if WITHOUT_USER_PROGRAMS:
+    offline_position = content.find("[WARN] user_processes_offline")
+    desktop_position = content.find("[PASS] desktop_online")
+    if (offline_position < 0 or desktop_position < 0 or
+            offline_position >= desktop_position):
+        print("qemu smoke test: FAIL")
+        print("userspace-offline warning did not precede desktop startup")
         print("--- debug log ---")
         print(content or "(empty)")
         sys.exit(1)

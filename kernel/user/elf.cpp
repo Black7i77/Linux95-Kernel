@@ -183,6 +183,16 @@ ElfStatus build_load_plan(const uint8_t* elf,
 ElfStatus load_process_image(const char* path,
                              linux95::process::Process& process)
 {
+    // Loading is only valid into a fresh allocation. In particular, never
+    // erase ownership metadata from an already-loaded process on retry.
+    if (path == nullptr ||
+        process.state != linux95::process::State::Created ||
+        process.page_table_physical != 0 ||
+        process.kernel_stack_base != 0 ||
+        process.kernel_stack_top != 0) {
+        return ElfStatus::InvalidSegment;
+    }
+
     const auto fail = [&](ElfStatus result) {
         clear_process(process);
         process.state = linux95::process::State::Unused;
