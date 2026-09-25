@@ -82,6 +82,9 @@ KERNEL_OBJS := \
 	$(BUILD)/vfs_self_test.o \
 	$(BUILD)/shell.o
 
+NETWORK_TEST_OBJS := $(subst $(BUILD)/kernel.o,$(BUILD)/kernel-network-test.o,$(KERNEL_OBJS))
+NETWORK_TEST_IMAGE := $(BUILD)/linux95-kernel-network-test.img
+
 .PHONY: all clean run run-debug test test-qemu prepare-storage-test-image test-host-memory test-host-storage test-host-filesystem test-host-graphics test-host-pci test-host-rtl8139-helpers test-host-kernel-virtual-to-physical test-host-ethernet test-host-arp test-host-ipv4 test-host-icmp test-memory-source test-storage-source test-relocations check-tools
 
 all: check-tools $(BUILD)/linux95-kernel.img
@@ -130,6 +133,14 @@ $(BUILD)/kernel.o: \
 	kernel/net/network.hpp \
 	kernel/filesystem/vfs_self_test.hpp | $(BUILD)
 >$(CXX) $(CXXFLAGS) -c $< -o $@
+
+$(BUILD)/kernel-network-test.o: \
+	kernel/kernel.cpp \
+	kernel/boot_info.hpp \
+	kernel/filesystem/vfs.hpp \
+	kernel/net/network.hpp \
+	kernel/filesystem/vfs_self_test.hpp | $(BUILD)
+>$(CXX) $(CXXFLAGS) -DLINUX95_QEMU_NETWORK_SELF_TEST -c $< -o $@
 
 $(BUILD)/renderer.o: kernel/graphics/renderer.cpp kernel/graphics/renderer.hpp kernel/graphics/font8x8.hpp kernel/graphics/framebuffer.hpp | $(BUILD)
 >$(CXX) $(CXXFLAGS) -c $< -o $@
@@ -370,6 +381,28 @@ $(BUILD)/kernel.bin: $(BUILD)/kernel.elf
 		exit 1; \
 	}
 
+$(BUILD)/kernel-network-test.elf: $(NETWORK_TEST_OBJS) linker.ld
+>$(LD) \
+	-nostdlib \
+	-z max-page-size=0x1000 \
+	-T linker.ld \
+	-o $@ \
+	$(NETWORK_TEST_OBJS)
+>@entry=$$($(READELF) -h $@ | awk '/Entry point address:/ {print $$4}'); \
+	test "$$entry" = "0x100000" || { \
+		echo "ERROR: bad network-test kernel entry: $$entry"; \
+		exit 1; \
+	}
+
+$(BUILD)/kernel-network-test.bin: $(BUILD)/kernel-network-test.elf
+>$(OBJCOPY) -O binary $< $@
+>@size=$$(stat -c%s $@); \
+	max=$$(( $(KERNEL_SECTORS) * $(SECTOR) )); \
+	test $$size -le $$max || { \
+		echo "ERROR: Network-test kernel too large: $$size > $$max"; \
+		exit 1; \
+	}
+
 $(BUILD)/linux95-kernel.img: \
 	$(BUILD)/stage1.bin \
 	$(BUILD)/stage2.bin \
@@ -381,6 +414,15 @@ $(BUILD)/linux95-kernel.img: \
 >@echo
 >@echo "Linux95 Kernel v1.0 Graphics Desktop Foundation image built:"
 >@ls -lh $@
+
+$(NETWORK_TEST_IMAGE): \
+	$(BUILD)/stage1.bin \
+	$(BUILD)/stage2.bin \
+	$(BUILD)/kernel-network-test.bin
+>dd if=/dev/zero of=$@ bs=$(SECTOR) count=$(IMAGE_SECTORS) status=none
+>dd if=$(BUILD)/stage1.bin of=$@ bs=$(SECTOR) seek=0 conv=notrunc status=none
+>dd if=$(BUILD)/stage2.bin of=$@ bs=$(SECTOR) seek=1 conv=notrunc status=none
+>dd if=$(BUILD)/kernel-network-test.bin of=$@ bs=$(SECTOR) seek=$(KERNEL_LBA) conv=notrunc status=none
 
 $(STORAGE_TEST_IMAGE): | $(BUILD)
 >$(PYTHON) tests/prepare_fat32_image.py $@
@@ -411,9 +453,10 @@ test: all test-host-memory test-host-storage test-host-filesystem test-host-grap
 >$(PYTHON) tests/filesystem_source_checks.py
 >$(PYTHON) tests/relocation_checks.py
 
-test-qemu: all prepare-storage-test-image
+test-qemu: all $(NETWORK_TEST_IMAGE) prepare-storage-test-image
 >@command -v $(QEMU) >/dev/null || { echo "Missing tool: $(QEMU)"; exit 1; }
 >$(PYTHON) tests/qemu_smoke.py
+>$(PYTHON) tests/qemu_smoke.py --without-network
 
 run: all prepare-storage-test-image
 >$(QEMU) \
@@ -422,7 +465,9 @@ run: all prepare-storage-test-image
 	-boot c \
     -vga std \
 	-drive if=ide,index=0,media=disk,format=raw,file=$(BUILD)/linux95-kernel.img \
-	-drive if=ide,index=1,media=disk,format=raw,file=$(STORAGE_TEST_IMAGE)
+	-drive if=ide,index=1,media=disk,format=raw,file=$(STORAGE_TEST_IMAGE) \
+	-netdev user,id=net0 \
+	-device rtl8139,netdev=net0
 
 run-debug: all prepare-storage-test-image
 >$(QEMU) \
@@ -432,6 +477,8 @@ run-debug: all prepare-storage-test-image
     -vga std \
 	-drive if=ide,index=0,media=disk,format=raw,file=$(BUILD)/linux95-kernel.img \
 	-drive if=ide,index=1,media=disk,format=raw,file=$(STORAGE_TEST_IMAGE) \
+	-netdev user,id=net0 \
+	-device rtl8139,netdev=net0 \
 	-no-reboot \
 	-no-shutdown
 

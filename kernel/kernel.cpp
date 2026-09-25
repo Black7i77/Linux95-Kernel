@@ -190,6 +190,11 @@ extern "C" [[noreturn]] void linux95_higher_half_entry(
 
     io::enable_interrupts();
 
+#ifdef LINUX95_QEMU_NETWORK_SELF_TEST
+    (void)network::start_ping(
+        net::Ipv4Address{{10, 0, 2, 2}});
+#endif
+
     if (framebuffer_result ==
         graphics::FramebufferInitResult::Unavailable) {
         debug::write("[INFO] graphics_fallback_vga\n");

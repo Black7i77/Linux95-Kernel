@@ -6,8 +6,18 @@ import subprocess
 import sys
 import time
 
+WITHOUT_NETWORK = "--without-network" in sys.argv[1:]
+
+if any(argument != "--without-network" for argument in sys.argv[1:]):
+    print("usage: qemu_smoke.py [--without-network]")
+    sys.exit(2)
+
 ROOT = Path(__file__).resolve().parents[1]
-IMAGE = ROOT / "build" / "linux95-kernel.img"
+IMAGE = ROOT / "build" / (
+    "linux95-kernel.img"
+    if WITHOUT_NETWORK
+    else "linux95-kernel-network-test.img"
+)
 STORAGE_IMAGE = ROOT / "build" / "linux95-storage-test.img"
 LOG = ROOT / "build" / "qemu-debug.log"
 
@@ -47,6 +57,12 @@ cmd = [
     "-global", "isa-debugcon.iobase=0xe9",
 ]
 
+if not WITHOUT_NETWORK:
+    cmd.extend([
+        "-netdev", "user,id=net0",
+        "-device", "rtl8139,netdev=net0",
+    ])
+
 proc = subprocess.Popen(
     cmd,
     stdout=subprocess.DEVNULL,
@@ -55,8 +71,13 @@ proc = subprocess.Popen(
 )
 
 deadline = time.monotonic() + 12.0
-saw_desktop = False
+saw_completion = False
 early_exit = None
+completion_marker = (
+    "[PASS] desktop_online"
+    if WITHOUT_NETWORK
+    else "[PASS] icmp_echo_reply"
+)
 
 try:
     while time.monotonic() < deadline:
@@ -67,8 +88,8 @@ try:
 
         if LOG.exists():
             content = LOG.read_text(errors="replace")
-            if "[PASS] desktop_online" in content:
-                saw_desktop = True
+            if completion_marker in content:
+                saw_completion = True
                 break
 
         time.sleep(0.05)
@@ -87,7 +108,7 @@ if proc.stderr is not None:
 
 content = LOG.read_text(errors="replace") if LOG.exists() else ""
 
-if early_exit is not None and not saw_desktop:
+if early_exit is not None and not saw_completion:
     print("qemu smoke test: FAIL")
     print(f"QEMU exited early with status {early_exit}")
     if stderr.strip():
@@ -140,6 +161,22 @@ required = [
     "[PASS] desktop_online",
 ]
 
+if WITHOUT_NETWORK:
+    if ("[WARN] pci_no_rtl8139" not in content and
+            "[WARN] network_offline" not in content):
+        required.append("[WARN] pci_no_rtl8139 or [WARN] network_offline")
+else:
+    required.extend([
+        "[PASS] rtl8139_detected",
+        "[PASS] rtl8139_initialized",
+        "[PASS] ethernet_ready",
+        "[PASS] arp_ready",
+        "[PASS] ipv4_ready",
+        "[PASS] icmp_ready",
+        "[PASS] arp_gateway_resolved",
+        "[PASS] icmp_echo_reply",
+    ])
+
 missing = [marker for marker in required if marker not in content]
 
 if missing:
@@ -159,4 +196,10 @@ if missing:
 print("[PASS] Linux95 booted in QEMU")
 print("[PASS] x86_64 kernel entered kernel_main")
 print("[PASS] kernel initialization reached graphical desktop")
+if WITHOUT_NETWORK:
+    print("[PASS] missing RTL8139 remained non-fatal")
+else:
+    print("[PASS] RTL8139 network stack initialized")
+    print("[PASS] ARP gateway resolved at 10.0.2.2")
+    print("[PASS] ICMP echo reply received from 10.0.2.2")
 print("QEMU smoke test: PASS")

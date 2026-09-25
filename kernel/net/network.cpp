@@ -193,9 +193,12 @@ void handle_arp(const net::EthernetView& frame)
 
     if (g_ping.state == net::icmp::PingState::ResolvingArp) {
         net::MacAddress next_hop_mac{};
-        if (net::arp::lookup(g_next_hop, next_hop_mac) &&
-            !transmit_echo_request(next_hop_mac)) {
-            g_ping.state = net::icmp::PingState::HostUnreachable;
+        if (net::arp::lookup(g_next_hop, next_hop_mac)) {
+            if (transmit_echo_request(next_hop_mac)) {
+                debug::write("[PASS] arp_gateway_resolved\n");
+            } else {
+                g_ping.state = net::icmp::PingState::HostUnreachable;
+            }
         }
     }
 }
@@ -223,6 +226,7 @@ void handle_ipv4(const net::EthernetView& frame)
             payload_bytes)) {
         g_ping.payload_bytes = payload_bytes;
         g_ping.state = net::icmp::PingState::ReplyReceived;
+        debug::write("[PASS] icmp_echo_reply\n");
     }
 }
 
