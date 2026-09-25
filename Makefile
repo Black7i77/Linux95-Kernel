@@ -130,6 +130,12 @@ $(BUILD)/user/init.o: user/init/main.cpp user/include/linux95_syscall.hpp | $(BU
 $(BUILD)/user/worker.o: user/worker/main.cpp user/include/linux95_syscall.hpp | $(BUILD)/user
 >$(CXX) $(USER_CXXFLAGS) -c $< -o $@
 
+$(BUILD)/user/preempt_hog.o: user/preempt_hog/main.cpp user/include/linux95_syscall.hpp | $(BUILD)/user
+>$(CXX) $(USER_CXXFLAGS) -c $< -o $@
+
+$(BUILD)/user/preempt_worker.o: user/preempt_worker/main.cpp user/include/linux95_syscall.hpp | $(BUILD)/user
+>$(CXX) $(USER_CXXFLAGS) -c $< -o $@
+
 $(BUILD)/user/fault.o: user/fault/main.cpp | $(BUILD)/user
 >$(CXX) $(USER_CXXFLAGS) -c $< -o $@
 
@@ -138,6 +144,12 @@ $(BUILD)/user/init.elf: $(BUILD)/user/start.o $(BUILD)/user/init.o user/user.ld
 
 $(BUILD)/user/worker.elf: $(BUILD)/user/start.o $(BUILD)/user/worker.o user/user.ld
 >$(LD) -nostdlib -static -no-pie -z max-page-size=0x1000 -T user/user.ld -o $@ $(BUILD)/user/start.o $(BUILD)/user/worker.o
+
+$(BUILD)/user/preempt_hog.elf: $(BUILD)/user/start.o $(BUILD)/user/preempt_hog.o user/user.ld
+>$(LD) -nostdlib -static -no-pie -z max-page-size=0x1000 -T user/user.ld -o $@ $(BUILD)/user/start.o $(BUILD)/user/preempt_hog.o
+
+$(BUILD)/user/preempt_worker.elf: $(BUILD)/user/start.o $(BUILD)/user/preempt_worker.o user/user.ld
+>$(LD) -nostdlib -static -no-pie -z max-page-size=0x1000 -T user/user.ld -o $@ $(BUILD)/user/start.o $(BUILD)/user/preempt_worker.o
 
 $(BUILD)/user/fault.elf: $(BUILD)/user/start.o $(BUILD)/user/fault.o user/user.ld
 >$(LD) -nostdlib -static -no-pie -z max-page-size=0x1000 -T user/user.ld -o $@ $(BUILD)/user/start.o $(BUILD)/user/fault.o
