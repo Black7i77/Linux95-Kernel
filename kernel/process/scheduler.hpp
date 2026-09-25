@@ -21,6 +21,7 @@ enum class HostReason {
     Yield,
     Exit,
     Fault,
+    Preempt,
 };
 
 bool run_once();

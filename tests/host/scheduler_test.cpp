@@ -53,5 +53,30 @@ int main() {
     }
     assert(on_timer_tick(true));
 
+    static_assert(
+        static_cast<int>(linux95::scheduler::HostReason::Preempt) !=
+        static_cast<int>(linux95::scheduler::HostReason::Yield));
+    static_assert(
+        static_cast<int>(linux95::scheduler::HostReason::Preempt) !=
+        static_cast<int>(linux95::scheduler::HostReason::Exit));
+    static_assert(
+        static_cast<int>(linux95::scheduler::HostReason::Preempt) !=
+        static_cast<int>(linux95::scheduler::HostReason::Fault));
+
+    Process preempt_table[3]{};
+    preempt_table[0].state = State::Ready;
+    preempt_table[1].state = State::Ready;
+    preempt_table[2].state = State::Blocked;
+
+    assert(
+        linux95::scheduler::choose_next(
+            preempt_table, 3, 0) == 1);
+
+    preempt_table[1].state = State::Blocked;
+
+    assert(
+        linux95::scheduler::choose_next(
+            preempt_table, 3, 0) == 0);
+
     return 0;
 }

@@ -5,6 +5,7 @@
 #include "arch/debug.hpp"
 #include "arch/interrupts.hpp"
 #include "memory/address.hpp"
+#include "panic/panic.hpp"
 #include "syscall/syscall.hpp"
 
 namespace linux95::scheduler {
@@ -160,6 +161,45 @@ bool run_once()
 namespace linux95::process {
 namespace {
 
+Process* validated_current_process()
+{
+    Process* current = syscall::cpu_local_state().current_process;
+
+    uintptr_t current_address =
+        reinterpret_cast<uintptr_t>(current);
+    uintptr_t table_begin =
+        reinterpret_cast<uintptr_t>(table());
+
+    const uintptr_t kernel_region_base =
+        static_cast<uintptr_t>(memory::kKernelRegionBase);
+
+    if (current_address >= kernel_region_base) {
+        current_address -= kernel_region_base;
+    }
+    if (table_begin >= kernel_region_base) {
+        table_begin -= kernel_region_base;
+    }
+
+    const uintptr_t table_bytes =
+        capacity() * sizeof(Process);
+
+    if (current == nullptr ||
+        current_address < table_begin ||
+        current_address >= table_begin + table_bytes ||
+        (current_address - table_begin) % sizeof(Process) != 0) {
+        return nullptr;
+    }
+
+    if (current->pid == 0 ||
+        current->state != State::Running ||
+        current->page_table_physical == 0 ||
+        current->kernel_stack_top == 0) {
+        return nullptr;
+    }
+
+    return current;
+}
+
 void debug_write_hex(uint64_t value)
 {
     static constexpr char kHex[] = "0123456789abcdef";
@@ -189,6 +229,29 @@ void debug_write_decimal(uint32_t value)
 
 }
 
+[[noreturn]] void handle_user_preempt(
+    const interrupts::InterruptFrame& frame)
+{
+    if ((frame.cs & 0x3U) != 0x3U) {
+        panic::halt(
+            "Kernel attempted to preempt non-user context");
+    }
+
+    Process* current = validated_current_process();
+    if (current == nullptr) {
+        panic::halt(
+            "Timer preemption without tracked running process");
+    }
+
+    capture_interrupt_context(*current, frame);
+    current->state = State::Ready;
+
+    scheduler::return_to_host(
+        *current,
+        current->context,
+        scheduler::HostReason::Preempt);
+}
+
 bool handle_user_fault(uint8_t vector,
                        uint64_t error_code,
                        const interrupts::InterruptFrame& frame)
@@ -198,28 +261,10 @@ bool handle_user_fault(uint8_t vector,
         return false;
     }
 
-    Process* current = syscall::cpu_local_state().current_process;
-    uintptr_t current_address = reinterpret_cast<uintptr_t>(current);
-    uintptr_t table_begin = reinterpret_cast<uintptr_t>(table());
-    const uintptr_t kernel_region_base =
-        static_cast<uintptr_t>(memory::kKernelRegionBase);
-    if (current_address >= kernel_region_base) {
-        current_address -= kernel_region_base;
-    }
-    if (table_begin >= kernel_region_base) {
-        table_begin -= kernel_region_base;
-    }
-    const uintptr_t table_bytes = capacity() * sizeof(Process);
-    if (current == nullptr || current_address < table_begin ||
-        current_address >= table_begin + table_bytes ||
-        (current_address - table_begin) % sizeof(Process) != 0) {
-        debug::write("[FAULT] CPL3 exception without a tracked process\n");
-        return false;
-    }
-    if (current->pid == 0 || current->state != State::Running ||
-        current->page_table_physical == 0 ||
-        current->kernel_stack_top == 0) {
-        debug::write("[FAULT] CPL3 exception without a running process\n");
+    Process* current = validated_current_process();
+    if (current == nullptr) {
+        debug::write(
+            "[FAULT] CPL3 exception without a tracked running process\n");
         return false;
     }
 
