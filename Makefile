@@ -23,6 +23,7 @@ KERNEL_SECTORS := 256
 IMAGE_SECTORS := 273
 STORAGE_TEST_IMAGE := $(BUILD)/linux95-storage-test.img
 FAULT_TEST_IMAGE := $(BUILD)/linux95-fault-test.img
+PREEMPTION_TEST_IMAGE := $(BUILD)/linux95-preemption-test.img
 
 HOST_CXXFLAGS := -std=c++17 -Wall -Wextra -Werror -O2 -Ikernel
 
@@ -572,6 +573,9 @@ done
 $(FAULT_TEST_IMAGE): tests/prepare_fat32_image.py $(BUILD)/user/fault.elf $(BUILD)/user/worker.elf | $(BUILD)
 >$(PYTHON) tests/prepare_fat32_image.py $@ --process-fault
 
+$(PREEMPTION_TEST_IMAGE): tests/prepare_fat32_image.py $(BUILD)/user/preempt_hog.elf $(BUILD)/user/preempt_worker.elf | $(BUILD)
+>$(PYTHON) tests/prepare_fat32_image.py $@ --process-preemption
+
 prepare-storage-test-image: $(STORAGE_TEST_IMAGE)
 
 test-memory-source:
@@ -603,6 +607,7 @@ test-qemu: all $(NETWORK_TEST_IMAGE) prepare-storage-test-image
 >@command -v $(QEMU) >/dev/null || { echo "Missing tool: $(QEMU)"; exit 1; }
 >$(PYTHON) tests/qemu_smoke.py
 >$(PYTHON) tests/qemu_smoke.py --without-network
+>$(PYTHON) tests/qemu_smoke.py --process-preemption-test
 
 run: all prepare-storage-test-image
 >$(QEMU) \

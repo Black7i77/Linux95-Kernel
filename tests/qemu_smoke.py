@@ -9,25 +9,29 @@ import time
 WITHOUT_NETWORK = "--without-network" in sys.argv[1:]
 PROCESS_SELF_TEST = "--process-self-test" in sys.argv[1:]
 PROCESS_FAULT_TEST = "--process-fault-test" in sys.argv[1:]
+PROCESS_PREEMPTION_TEST = "--process-preemption-test" in sys.argv[1:]
 WITHOUT_USER_PROGRAMS = "--without-user-programs" in sys.argv[1:]
 
 if sum((WITHOUT_NETWORK, PROCESS_SELF_TEST, PROCESS_FAULT_TEST,
-        WITHOUT_USER_PROGRAMS)) > 1 or any(
+        PROCESS_PREEMPTION_TEST, WITHOUT_USER_PROGRAMS)) > 1 or any(
         argument not in ("--without-network", "--process-self-test",
-                         "--process-fault-test", "--without-user-programs")
+                         "--process-fault-test", "--process-preemption-test",
+                         "--without-user-programs")
        for argument in sys.argv[1:]):
     print("usage: qemu_smoke.py [--without-network] [--process-self-test] "
-          "[--process-fault-test] [--without-user-programs]")
+          "[--process-fault-test] [--process-preemption-test] "
+          "[--without-user-programs]")
     sys.exit(2)
 
 ROOT = Path(__file__).resolve().parents[1]
 IMAGE = ROOT / "build" / (
     "linux95-kernel.img"
     if WITHOUT_NETWORK or PROCESS_SELF_TEST or PROCESS_FAULT_TEST or
-            WITHOUT_USER_PROGRAMS
+            PROCESS_PREEMPTION_TEST or WITHOUT_USER_PROGRAMS
     else "linux95-kernel-network-test.img"
 )
 STORAGE_IMAGE = ROOT / "build" / (
+    "linux95-preemption-test.img" if PROCESS_PREEMPTION_TEST else
     "linux95-fault-test.img" if PROCESS_FAULT_TEST else
     "linux95-no-user-test.img" if WITHOUT_USER_PROGRAMS else
     "linux95-storage-test.img"
@@ -44,6 +48,13 @@ if QEMU is None:
 if PROCESS_FAULT_TEST:
     subprocess.run(
         ["make", "all", "build/linux95-fault-test.img"],
+        cwd=ROOT,
+        check=True,
+    )
+
+if PROCESS_PREEMPTION_TEST:
+    subprocess.run(
+        ["make", "all", "build/linux95-preemption-test.img"],
         cwd=ROOT,
         check=True,
     )
@@ -103,7 +114,8 @@ cmd = [
     "-global", "isa-debugcon.iobase=0xe9",
 ]
 
-if not WITHOUT_NETWORK and not PROCESS_SELF_TEST and not PROCESS_FAULT_TEST:
+if (not WITHOUT_NETWORK and not PROCESS_SELF_TEST and
+        not PROCESS_FAULT_TEST and not PROCESS_PREEMPTION_TEST):
     cmd.extend([
         "-netdev", "user,id=net0",
         "-device", "rtl8139,netdev=net0",
@@ -121,7 +133,9 @@ saw_completion = False
 completion_seen_at = None
 early_exit = None
 completion_marker = (
-    "[PASS] desktop remained online"
+    "[PASS] preemptive round robin"
+    if PROCESS_PREEMPTION_TEST
+    else "[PASS] desktop remained online"
     if PROCESS_SELF_TEST or PROCESS_FAULT_TEST
     else ("[PASS] desktop_online"
           if WITHOUT_NETWORK or WITHOUT_USER_PROGRAMS
@@ -217,7 +231,8 @@ required = [
     "[PASS] desktop_online",
 ]
 
-if WITHOUT_NETWORK or PROCESS_SELF_TEST or PROCESS_FAULT_TEST:
+if (WITHOUT_NETWORK or PROCESS_SELF_TEST or PROCESS_FAULT_TEST or
+        PROCESS_PREEMPTION_TEST):
     if ("[WARN] pci_no_rtl8139" not in content and
             "[WARN] network_offline" not in content):
         required.append("[WARN] pci_no_rtl8139 or [WARN] network_offline")
@@ -262,6 +277,18 @@ if PROCESS_FAULT_TEST:
         "[PASS] faulty process terminated",
         "[PASS] kernel survived user fault",
         "[PASS] desktop remained online",
+    ])
+
+if PROCESS_PREEMPTION_TEST:
+    required.extend([
+        "[pid 1] entered non-yielding loop",
+        "[PASS] user quantum expired",
+        "[PASS] preempted context captured",
+        "[PASS] timer preemption returned to host",
+        "[PASS] desktop remained online after preemption",
+        "[PASS] non-yielding process was preempted",
+        "[pid 2] scheduled by timer preemption",
+        "[PASS] preemptive round robin",
     ])
 
 if WITHOUT_USER_PROGRAMS:
@@ -391,10 +418,53 @@ if PROCESS_FAULT_TEST:
         print(content or "(empty)")
         sys.exit(1)
 
+if PROCESS_PREEMPTION_TEST:
+    # These follow the actual state-transition boundaries:
+    # host survival is known before redispatch, and selection occurs
+    # before the selected userspace process executes its first write.
+    preemption_markers = [
+        "[pid 1] entered non-yielding loop",
+        "[PASS] user quantum expired",
+        "[PASS] preempted context captured",
+        "[PASS] timer preemption returned to host",
+        "[PASS] desktop remained online after preemption",
+        "[PASS] non-yielding process was preempted",
+        "[pid 2] scheduled by timer preemption",
+        "[PASS] preemptive round robin",
+    ]
+
+    positions = [content.find(marker) for marker in preemption_markers]
+
+    if (any(position < 0 for position in positions) or
+            positions != sorted(positions)):
+        print("qemu smoke test: FAIL")
+        print("preemption markers did not appear in causal order")
+        print("--- debug log ---")
+        print(content or "(empty)")
+        sys.exit(1)
+
+    if any(content.count(marker) != 1 for marker in preemption_markers):
+        print("qemu smoke test: FAIL")
+        print("a one-shot preemption marker had an unexpected count")
+        print("--- debug log ---")
+        print(content or "(empty)")
+        sys.exit(1)
+
+    if ("#DF" in content or
+            "double fault" in content.lower() or
+            "triple fault" in content.lower() or
+            "reset" in content.lower()):
+        print("qemu smoke test: FAIL")
+        print("preemption test encountered a reset or fatal fault")
+        print("--- debug log ---")
+        print(content or "(empty)")
+        sys.exit(1)
+
 print("[PASS] Linux95 booted in QEMU")
 print("[PASS] x86_64 kernel entered kernel_main")
 print("[PASS] kernel initialization reached graphical desktop")
-if WITHOUT_NETWORK or PROCESS_SELF_TEST or PROCESS_FAULT_TEST:
+if (WITHOUT_NETWORK or PROCESS_SELF_TEST or PROCESS_FAULT_TEST or
+        PROCESS_PREEMPTION_TEST):
     print("[PASS] missing RTL8139 remained non-fatal")
 elif WITHOUT_USER_PROGRAMS:
     print("[PASS] RTL8139 network stack initialized")
