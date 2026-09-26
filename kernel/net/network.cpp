@@ -6,6 +6,7 @@
 #include "net/arp.hpp"
 #include "net/ethernet.hpp"
 #include "net/ipv4.hpp"
+#include "net/udp.hpp"
 
 #include <stdint.h>
 
@@ -25,6 +26,7 @@ constexpr uint8_t kMaxFramesPerPoll = 8;
 constexpr uint16_t kMaxFrameLength = 1518;
 constexpr uint16_t kMaxIpv4Length = 1500;
 constexpr uint8_t kIcmpProtocol = 1;
+constexpr uint8_t kUdpProtocol = 17;
 constexpr uint16_t kPingIdentifier = 0x4C95;
 constexpr uint64_t kArpTimeoutSeconds = 1;
 constexpr uint64_t kReplyTimeoutSeconds = 2;
@@ -40,6 +42,16 @@ net::Ipv4Address g_next_hop{};
 uint64_t g_deadline = 0;
 uint16_t g_next_sequence = 1;
 uint16_t g_next_identification = 1;
+net::udp::bindings::Table g_udp_bindings{};
+
+void diagnostic(const char* message)
+{
+#ifndef LINUX95_NETWORK_HOST_TEST
+    debug::write(message);
+#else
+    (void)message;
+#endif
+}
 
 bool mac_equals(
     const net::MacAddress& left,
@@ -195,7 +207,7 @@ void handle_arp(const net::EthernetView& frame)
         net::MacAddress next_hop_mac{};
         if (net::arp::lookup(g_next_hop, next_hop_mac)) {
             if (transmit_echo_request(next_hop_mac)) {
-                debug::write("[PASS] arp_gateway_resolved\n");
+                diagnostic("[PASS] arp_gateway_resolved\n");
             } else {
                 g_ping.state = net::icmp::PingState::HostUnreachable;
             }
@@ -210,23 +222,34 @@ void handle_ipv4(const net::EthernetView& frame)
             frame.payload,
             frame.payload_length,
             packet) ||
-        !ipv4_equals(packet.destination, g_status.ip) ||
-        packet.protocol != kIcmpProtocol ||
-        g_ping.state != net::icmp::PingState::WaitingReply ||
-        !ipv4_equals(packet.source, g_ping.address)) {
+        !ipv4_equals(packet.destination, g_status.ip)) {
         return;
     }
 
-    uint16_t payload_bytes = 0;
-    if (net::icmp::accept_echo_reply(
-            packet.payload,
-            packet.payload_length,
-            kPingIdentifier,
-            g_ping.sequence,
-            payload_bytes)) {
-        g_ping.payload_bytes = payload_bytes;
-        g_ping.state = net::icmp::PingState::ReplyReceived;
-        debug::write("[PASS] icmp_echo_reply\n");
+    if (packet.protocol == kIcmpProtocol) {
+        if (g_ping.state != net::icmp::PingState::WaitingReply ||
+            !ipv4_equals(packet.source, g_ping.address)) {
+            return;
+        }
+        uint16_t payload_bytes = 0;
+        if (net::icmp::accept_echo_reply(
+                packet.payload,
+                packet.payload_length,
+                kPingIdentifier,
+                g_ping.sequence,
+                payload_bytes)) {
+            g_ping.payload_bytes = payload_bytes;
+            g_ping.state = net::icmp::PingState::ReplyReceived;
+            diagnostic("[PASS] icmp_echo_reply\n");
+        }
+    } else if (packet.protocol == kUdpProtocol) {
+        net::udp::DatagramView datagram{};
+        if (net::udp::parse(packet.payload, packet.payload_length,
+                            packet.source, packet.destination, datagram)) {
+            g_udp_bindings.dispatch(packet.source, datagram.source_port,
+                                    datagram.destination_port, datagram.payload,
+                                    datagram.payload_length);
+        }
     }
 }
 
@@ -274,6 +297,7 @@ bool initialize()
     g_next_sequence = 1;
     g_next_identification = 1;
     net::arp::reset();
+    g_udp_bindings = net::udp::bindings::Table{};
 
     if (!rtl8139::initialize()) {
         return false;
@@ -285,13 +309,24 @@ bool initialize()
     }
     g_status.online = true;
 
-    debug::write("[PASS] rtl8139_detected\n");
-    debug::write("[PASS] rtl8139_initialized\n");
-    debug::write("[PASS] ethernet_ready\n");
-    debug::write("[PASS] arp_ready\n");
-    debug::write("[PASS] ipv4_ready\n");
-    debug::write("[PASS] icmp_ready\n");
+    diagnostic("[PASS] rtl8139_detected\n");
+    diagnostic("[PASS] rtl8139_initialized\n");
+    diagnostic("[PASS] ethernet_ready\n");
+    diagnostic("[PASS] arp_ready\n");
+    diagnostic("[PASS] ipv4_ready\n");
+    diagnostic("[PASS] icmp_ready\n");
+    diagnostic("[PASS] udp_ready\n");
     return true;
+}
+
+bool bind_udp_port(uint16_t port, UdpReceiveCallback callback, void* context)
+{
+    return g_udp_bindings.bind(port, callback, context);
+}
+
+bool unbind_udp_port(uint16_t port)
+{
+    return g_udp_bindings.unbind(port);
 }
 
 void poll()

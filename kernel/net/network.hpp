@@ -2,6 +2,7 @@
 
 #include "net/icmp.hpp"
 #include "net/net_types.hpp"
+#include "net/udp_bindings.hpp"
 
 namespace linux95::network {
 
@@ -16,6 +17,10 @@ struct Status {
 bool initialize();
 void poll();
 Status status();
+
+using UdpReceiveCallback = net::udp::bindings::ReceiveCallback;
+bool bind_udp_port(uint16_t port, UdpReceiveCallback callback, void* context);
+bool unbind_udp_port(uint16_t port);
 
 bool start_ping(net::Ipv4Address destination);
 
