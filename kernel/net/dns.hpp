@@ -55,4 +55,13 @@ ParsedResponse parse_response(const uint8_t* message, size_t length,
                               const Name* visited_names,
                               size_t visited_count);
 
+bool initialize();
+Status begin_lookup(const char* hostname);
+void poll();
+Status lookup_status();
+size_t result_count();
+bool result_address(size_t index, net::Ipv4Address& out);
+net::Ipv4Address server();
+Status set_server(const net::Ipv4Address& address);
+
 } // namespace linux95::net::dns

@@ -1,8 +1,110 @@
 #include "net/dns.hpp"
 
+#include "arch/pit.hpp"
+#include "net/network.hpp"
+
 namespace linux95::net::dns {
 
 namespace {
+
+constexpr uint16_t kClientPort = 53000;
+constexpr uint16_t kServerPort = 53;
+
+struct Resolver {
+    net::Ipv4Address server{{10, 0, 2, 3}};
+    Status status = Status::Idle;
+    bool bound = false;
+    bool awaiting = false;
+    bool queued_followup = false;
+    Name question{};
+    Name visited_names[5]{};
+    uint8_t visited_count = 0;
+    net::Ipv4Address addresses[8]{};
+    uint8_t address_count = 0;
+    uint16_t next_id = 0;
+    uint16_t active_id = 0;
+    uint8_t attempts = 0;
+    uint64_t sent_at = 0;
+    uint8_t query_packet[512]{};
+};
+
+Resolver g_resolver{};
+
+bool addresses_equal(const net::Ipv4Address& left,
+                     const net::Ipv4Address& right)
+{
+    for (size_t i = 0; i < 4; ++i) {
+        if (left.bytes[i] != right.bytes[i]) {
+            return false;
+        }
+    }
+    return true;
+}
+
+void fail_unavailable()
+{
+    g_resolver.status = Status::NetworkUnavailable;
+    g_resolver.awaiting = false;
+    g_resolver.queued_followup = false;
+}
+
+void send_attempt()
+{
+    if (!network::status().online) {
+        fail_unavailable();
+        return;
+    }
+    const uint16_t id = static_cast<uint16_t>(g_resolver.next_id + 1);
+    size_t packet_length = 0;
+    if (!build_query(id, g_resolver.question, g_resolver.query_packet,
+                     sizeof(g_resolver.query_packet), packet_length) ||
+        !network::send_udp(g_resolver.server, kClientPort, kServerPort,
+                           g_resolver.query_packet,
+                           static_cast<uint16_t>(packet_length))) {
+        fail_unavailable();
+        return;
+    }
+    g_resolver.next_id = id;
+    g_resolver.active_id = id;
+    ++g_resolver.attempts;
+    g_resolver.sent_at = pit::ticks();
+    g_resolver.awaiting = true;
+}
+
+void on_udp(const net::Ipv4Address& source, uint16_t source_port,
+            uint16_t destination_port, const uint8_t* payload,
+            uint16_t payload_length, void*)
+{
+    if (g_resolver.status != Status::Pending || !g_resolver.awaiting ||
+        !addresses_equal(source, g_resolver.server) ||
+        source_port != kServerPort || destination_port != kClientPort) {
+        return;
+    }
+    const ParsedResponse parsed = parse_response(
+        payload, payload_length, g_resolver.active_id,
+        g_resolver.question, g_resolver.visited_names,
+        g_resolver.visited_count);
+    if (parsed.disposition == ParseDisposition::Ignored) {
+        return;
+    }
+    g_resolver.awaiting = false;
+    if (parsed.disposition == ParseDisposition::Followup) {
+        g_resolver.question = parsed.followup_name;
+        g_resolver.visited_count = parsed.visited_count;
+        for (size_t i = 0; i < parsed.visited_count; ++i) {
+            g_resolver.visited_names[i] = parsed.visited_names[i];
+        }
+        g_resolver.attempts = 0;
+        g_resolver.queued_followup = true;
+        return;
+    }
+    g_resolver.status = parsed.status;
+    g_resolver.address_count = parsed.status == Status::Success
+        ? parsed.address_count : 0;
+    for (size_t i = 0; i < g_resolver.address_count; ++i) {
+        g_resolver.addresses[i] = parsed.addresses[i];
+    }
+}
 
 bool ascii_alnum(uint8_t value)
 {
@@ -99,6 +201,88 @@ bool read_record(const uint8_t* message, size_t length,
 }
 
 } // namespace
+
+bool initialize()
+{
+    if (g_resolver.bound) {
+        return true;
+    }
+    g_resolver.bound = network::bind_udp_port(kClientPort, on_udp, nullptr);
+    return g_resolver.bound;
+}
+
+Status begin_lookup(const char* hostname)
+{
+    if (g_resolver.status == Status::Pending) {
+        return Status::Busy;
+    }
+    Name question{};
+    if (!encode_hostname(hostname, question)) {
+        g_resolver.status = Status::InvalidName;
+        return g_resolver.status;
+    }
+    g_resolver.address_count = 0;
+    g_resolver.awaiting = false;
+    g_resolver.queued_followup = false;
+    if (!g_resolver.bound || !network::status().online) {
+        fail_unavailable();
+        return g_resolver.status;
+    }
+    g_resolver.question = question;
+    g_resolver.visited_names[0] = question;
+    g_resolver.visited_count = 1;
+    g_resolver.attempts = 0;
+    g_resolver.status = Status::Pending;
+    send_attempt();
+    return g_resolver.status;
+}
+
+void poll()
+{
+    if (g_resolver.status != Status::Pending) {
+        return;
+    }
+    if (g_resolver.queued_followup) {
+        g_resolver.queued_followup = false;
+        send_attempt();
+        return;
+    }
+    if (!g_resolver.awaiting ||
+        pit::ticks() - g_resolver.sent_at <
+            static_cast<uint64_t>(pit::ticks_per_second()) * 2) {
+        return;
+    }
+    g_resolver.awaiting = false;
+    if (g_resolver.attempts == 1) {
+        send_attempt();
+    } else {
+        g_resolver.status = Status::TimedOut;
+    }
+}
+
+Status lookup_status() { return g_resolver.status; }
+
+size_t result_count() { return g_resolver.address_count; }
+
+bool result_address(size_t index, net::Ipv4Address& out)
+{
+    if (index >= g_resolver.address_count) {
+        return false;
+    }
+    out = g_resolver.addresses[index];
+    return true;
+}
+
+net::Ipv4Address server() { return g_resolver.server; }
+
+Status set_server(const net::Ipv4Address& address)
+{
+    if (g_resolver.status == Status::Pending) {
+        return Status::Busy;
+    }
+    g_resolver.server = address;
+    return Status::Success;
+}
 
 bool encode_hostname(const char* hostname, Name& out)
 {

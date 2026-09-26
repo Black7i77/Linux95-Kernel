@@ -45,6 +45,11 @@ uint64_t ticks()
     return g_ticks;
 }
 
+uint32_t ticks_per_second()
+{
+    return g_hz;
+}
+
 uint64_t uptime_seconds()
 {
     return g_ticks / g_hz;
