@@ -22,10 +22,12 @@ for path in sorted(FS.glob("*")):
             )
 
 writer = (FS / "fat32_write.cpp").read_text()
-if "storage::write_sector(storage::DiskId::Test," not in writer:
-    raise SystemExit("FAIL: FAT32 writer does not target Test disk")
-if re.search(r"storage::write_sector\s*\(\s*storage::DiskId::Boot", writer):
-    raise SystemExit("FAIL: FAT32 writer targets Boot disk")
+write_calls = list(re.finditer(r"storage::write_sector\s*\(", writer))
+if not write_calls:
+    raise SystemExit("FAIL: FAT32 writer has no sector-write call")
+for call in write_calls:
+    if not re.match(r"\s*storage::DiskId::Test\s*,", writer[call.end():]):
+        raise SystemExit("FAIL: FAT32 writer sector-write call does not target Test disk")
 
 if "storage::read_sector" not in fat32:
     raise SystemExit(

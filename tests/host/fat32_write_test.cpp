@@ -11,8 +11,20 @@ namespace {
 
 uint8_t boot[512], fat[2][512], root[512], second_root[512], third_root[512], file_a[512], file_b[512];
 uint32_t writes = 0;
+uint32_t write_attempts = 0;
 uint32_t fail_lba = 0xffffffffu;
+uint32_t fail_read_lba = 0xffffffffu;
+struct WriteFailure { uint32_t ordinal; uint32_t lba; };
+WriteFailure write_failures[2] = {};
+uint32_t write_failure_count = 0;
 linux95::storage::ata::DeviceInfo device = {true, true, 131072, {}};
+
+void fail_read_on(uint32_t lba) { fail_read_lba = lba; }
+void fail_write_on(uint32_t ordinal, uint32_t lba) {
+    assert(write_failure_count < 2);
+    write_failures[write_failure_count++] = {ordinal, lba};
+}
+uint32_t write_attempt_count() { return write_attempts; }
 
 void put16(uint8_t* p, uint32_t n, uint16_t v) {
     p[n] = static_cast<uint8_t>(v);
@@ -48,7 +60,9 @@ void reset(uint16_t flags = 0) {
     memcpy(second_root, file, 11); second_root[11] = 0x20;
     second_root[26] = 4; put32(second_root, 28, 1024);
     second_root[32] = 0;
-    writes = 0; fail_lba = 0xffffffffu;
+    writes = 0; write_attempts = 0;
+    fail_lba = 0xffffffffu; fail_read_lba = 0xffffffffu;
+    write_failure_count = 0;
 }
 bool visit(const linux95::filesystem::Entry& e, void* p) {
     *static_cast<bool*>(p) = strcmp(e.name, "FILE.TXT") == 0;
@@ -62,7 +76,7 @@ void mounted() {
 
 namespace linux95::storage {
 bool read_sector(DiskId disk, uint32_t lba, uint8_t* out) {
-    if (disk != DiskId::Test || out == nullptr) return false;
+    if (disk != DiskId::Test || out == nullptr || lba == fail_read_lba) return false;
     const uint8_t* src = nullptr;
     if (lba == 0) src = boot;
     if (lba == 32) src = fat[0];
@@ -76,7 +90,12 @@ bool read_sector(DiskId disk, uint32_t lba, uint8_t* out) {
     memcpy(out, src, 512); return true;
 }
 bool write_sector(DiskId disk, uint32_t lba, const uint8_t* in) {
-    if (disk != DiskId::Test || in == nullptr || lba == fail_lba) return false;
+    if (disk != DiskId::Test || in == nullptr) return false;
+    ++write_attempts;
+    if (lba == fail_lba) return false;
+    for (uint32_t i = 0; i < write_failure_count; ++i)
+        if (write_attempts == write_failures[i].ordinal && lba == write_failures[i].lba)
+            return false;
     uint8_t* dst = lba == 32 ? fat[0] : lba == 1042 ? fat[1] : nullptr;
     if (!dst) return false;
     memcpy(dst, in, 512); ++writes; return true;
@@ -110,11 +129,12 @@ int main() {
         sizeof mirrored_data, mirrored_read, mirrored_size) == Status::Ok);
     assert(mirrored_read == 1024 && mirrored_data[512] == 'B');
     put32(fat[0], 16, 0xcfffffffu);
-    put32(fat[1], 16, 0xcfffffffu);
+    put32(fat[1], 16, 0xdfffffffu);
     assert(write::write_fat_entry(4, 5) == Status::Ok);
-    assert(get32(fat[0], 16) == 0xc0000005u && get32(fat[1], 16) == 0xc0000005u);
+    assert(get32(fat[0], 16) == 0xc0000005u && get32(fat[1], 16) == 0xd0000005u);
     assert(writes == 2);
     assert(write::write_fat_entry(4, 0x0fffffffu) == Status::Ok);
+    assert(get32(fat[0], 16) == 0xcfffffffu && get32(fat[1], 16) == 0xdfffffffu);
 
     reset(0x0081); mounted();
     assert(mounted_geometry(g) && !g.mirroring_enabled && g.active_fat == 1);
@@ -170,5 +190,31 @@ int main() {
     value = 123;
     assert(write::allocate_chain(1, value) == Status::IoError && value == 0);
     assert((get32(fat[0], 24) & 0x0fffffffu) == 0 && writes == 2);
+
+    reset(); mounted();
+    put32(fat[0], 24, 0x10000000u); put32(fat[1], 24, 0x20000000u);
+    put32(fat[0], 28, 0x30000000u); put32(fat[1], 28, 0x40000000u);
+    fail_write_on(6, 1042); // second copy of the later 6 -> 7 link
+    value = 123;
+    assert(write::allocate_chain(2, value) == Status::IoError);
+    assert(value == 0);
+    assert(get32(fat[0], 24) == 0x10000000u && get32(fat[1], 24) == 0x20000000u);
+    assert(get32(fat[0], 28) == 0x30000000u && get32(fat[1], 28) == 0x40000000u);
+    assert(write_attempt_count() == 11);
+
+    reset(); mounted();
+    put32(fat[0], 16, 0xafffffffu); put32(fat[1], 16, 0xbfffffffu);
+    fail_write_on(2, 1042); // second-copy write
+    fail_write_on(3, 32);   // rollback of the earlier successful write
+    assert(write::write_fat_entry(4, 5) == Status::IoError);
+    assert(get32(fat[0], 16) == 0xa0000005u && get32(fat[1], 16) == 0xbfffffffu);
+    assert(write_attempt_count() == 3 && writes == 1);
+
+    reset(); mounted();
+    put32(fat[0], 16, 0xafffffffu); put32(fat[1], 16, 0xbfffffffu);
+    fail_read_on(1042);
+    assert(write::write_fat_entry(4, 5) == Status::IoError);
+    assert(get32(fat[0], 16) == 0xafffffffu && get32(fat[1], 16) == 0xbfffffffu);
+    assert(write_attempt_count() == 0 && writes == 0);
     puts("fat32 write tests: PASS");
 }

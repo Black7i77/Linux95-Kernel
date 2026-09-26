@@ -153,6 +153,7 @@ Status allocate_chain(uint32_t clusters, uint32_t& first_cluster)
             if (status != Status::Ok) {
                 const Status discard = write_fat_entry(candidate, 0);
                 const Status cleanup = free_chain(first_cluster);
+                first_cluster = 0;
                 return discard == Status::Ok && cleanup == Status::Ok
                     ? status : Status::IoError;
             }

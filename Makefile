@@ -720,6 +720,7 @@ test-storage-source:
 
 test-filesystem-source:
 >$(PYTHON) tests/filesystem_source_checks.py
+>$(PYTHON) tests/filesystem_source_checks_test.py
 
 .PHONY: test-preemption-source
 test-preemption-source:
@@ -733,6 +734,7 @@ test: all test-host-memory test-host-storage test-host-heap test-host-segments t
 >$(PYTHON) tests/memory_source_checks.py
 >$(PYTHON) tests/storage_source_checks.py
 >$(PYTHON) tests/filesystem_source_checks.py
+>$(PYTHON) tests/filesystem_source_checks_test.py
 >$(PYTHON) tests/relocation_checks.py
 
 test-qemu: all $(NETWORK_TEST_IMAGE) $(UDP_NETWORK_TEST_IMAGE) $(DNS_NETWORK_TEST_IMAGE) prepare-storage-test-image
