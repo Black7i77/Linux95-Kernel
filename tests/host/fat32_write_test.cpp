@@ -396,5 +396,58 @@ int main() {
     put32(fat[0], 8, 2); put32(fat[1], 8, 2);
     assert(write::find_directory_entry(2, "LOST.TXT", slot, raw) == Status::Corrupt);
     assert(write_attempt_count() == 0);
+
+    // Replacing an end marker must leave the following stale short entry hidden.
+    reset(); mounted();
+    root[0] = 0;
+    memcpy(root + 32, "STALE   TXT", 11); root[32 + 11] = 0x20;
+    assert(write::find_directory_entry(2, "STALE.TXT", slot, raw) == Status::NotFound);
+    assert(write::create_directory_entry(2, "NEW.TXT", prototype, slot) == Status::Ok);
+    assert(root[32] == 0);
+    assert(write::find_directory_entry(2, "STALE.TXT", slot, raw) == Status::NotFound);
+    assert(write::find_directory_entry(2, "NEW.TXT", slot, raw) == Status::Ok);
+
+    // The replacement terminator can be in the next sector of one cluster.
+    reset(); boot[13] = 2; put32(boot, 32, 140000);
+    device.lba28_sector_count = 140000; mounted(); fill_root();
+    root[15 * 32] = 0;
+    memcpy(second_root, "STALE   TXT", 11); second_root[11] = 0x20;
+    assert(write::create_directory_entry(2, "NEW.TXT", prototype, slot) == Status::Ok);
+    assert(second_root[0] == 0);
+    assert(write::find_directory_entry(2, "STALE.TXT", slot, raw) == Status::NotFound);
+
+    // The next cluster may already be linked, or need to be grown first.
+    reset(); mounted(); fill_root(); root[15 * 32] = 0;
+    put32(fat[0], 8, 6); put32(fat[1], 8, 6);
+    put32(fat[0], 24, 0x0fffffffu); put32(fat[1], 24, 0x0fffffffu);
+    memcpy(third_root, "STALE   TXT", 11); third_root[11] = 0x20;
+    assert(write::create_directory_entry(2, "NEW.TXT", prototype, slot) == Status::Ok);
+    assert(third_root[0] == 0);
+    assert(write::find_directory_entry(2, "STALE.TXT", slot, raw) == Status::NotFound);
+
+    reset(); mounted(); fill_root(); root[15 * 32] = 0;
+    memset(third_root, 0xa5, sizeof third_root);
+    assert(write::create_directory_entry(2, "NEW.TXT", prototype, slot) == Status::Ok);
+    assert((get32(fat[0], 8) & 0x0fffffffu) == 6);
+    assert((get32(fat[0], 24) & 0x0fffffffu) == 0x0fffffffu);
+    assert(third_root[0] == 0);
+    assert(write::find_directory_entry(2, "NEW.TXT", slot, raw) == Status::Ok);
+
+    // An in-range but unallocated directory cluster is still corrupt.
+    const uint32_t invalid_directory_fat[] = {0u, 0x0ffffff7u};
+    for (uint32_t invalid : invalid_directory_fat) {
+        reset(); mounted();
+        put32(fat[0], 8, invalid); put32(fat[1], 8, invalid);
+        assert(write::find_directory_entry(2, "DOCS", slot, raw) == Status::Corrupt);
+        assert(write::resolve_path("DOCS/FILE.TXT", path) == Status::Corrupt);
+        assert(write::create_directory_entry(2, "NEW.TXT", prototype, slot) == Status::Corrupt);
+        assert(write_attempt_count() == 0);
+
+        reset(); mounted();
+        put32(fat[0], 12, invalid); put32(fat[1], 12, invalid);
+        assert(write::resolve_path("DOCS/FILE.TXT", path) == Status::Corrupt);
+        assert(write::create_directory_entry(3, "NEW.TXT", prototype, slot) == Status::Corrupt);
+        assert(write_attempt_count() == 0);
+    }
     puts("fat32 write tests: PASS");
 }

@@ -110,12 +110,16 @@ bool live_short_entry(const uint8_t* entry)
 Status find_in_directory(const helpers::BpbGeometry& g, uint32_t first_cluster,
                          const uint8_t name[11], DirectorySlot& found_slot,
                          uint8_t found_entry[32], DirectorySlot* free_slot,
-                         uint32_t* tail)
+                         uint32_t* tail, bool* free_is_end = nullptr)
 {
     if (!valid_cluster(g, first_cluster)) return Status::Corrupt;
     bool have_free = false;
     uint32_t cluster = first_cluster;
     for (uint32_t walked = 0; walked < g.cluster_count; ++walked) {
+        uint32_t next = 0;
+        bool end = false;
+        const Status step = chain_next(g, cluster, next, end);
+        if (step != Status::Ok) return step;
         for (uint32_t sector_index = 0; sector_index < g.sectors_per_cluster;
              ++sector_index) {
             uint32_t lba = 0;
@@ -127,6 +131,7 @@ Status find_in_directory(const helpers::BpbGeometry& g, uint32_t first_cluster,
                 const uint8_t* entry = sector + offset;
                 if ((entry[0] == 0 || entry[0] == 0xe5) && !have_free) {
                     if (free_slot != nullptr) *free_slot = {lba, offset};
+                    if (free_is_end != nullptr) *free_is_end = entry[0] == 0;
                     have_free = true;
                 }
                 if (entry[0] == 0) {
@@ -146,10 +151,6 @@ Status find_in_directory(const helpers::BpbGeometry& g, uint32_t first_cluster,
                 }
             }
         }
-        uint32_t next = 0;
-        bool end = false;
-        const Status step = chain_next(g, cluster, next, end);
-        if (step != Status::Ok) return step;
         if (end) {
             if (tail != nullptr) *tail = cluster;
             return Status::NotFound;
@@ -191,6 +192,18 @@ Status put_directory_entry(const helpers::BpbGeometry& g,
         }
     }
     return Status::IoError;
+}
+
+Status clear_end_marker(const helpers::BpbGeometry& g, const DirectorySlot& slot)
+{
+    if (!valid_slot(g, slot)) return Status::Corrupt;
+    uint8_t sector[512];
+    if (!storage::read_sector(storage::DiskId::Test, slot.lba, sector))
+        return Status::IoError;
+    if (sector[slot.offset] == 0) return Status::Ok;
+    sector[slot.offset] = 0;
+    return storage::write_sector(storage::DiskId::Test, slot.lba, sector)
+        ? Status::Ok : Status::IoError;
 }
 
 void reclaim_if_unlinked(const helpers::BpbGeometry& g, uint32_t tail,
@@ -333,12 +346,43 @@ Status create_directory_entry(uint32_t directory_cluster, const char* name,
     DirectorySlot vacant = {};
     uint8_t existing[32] = {};
     uint32_t tail = 0;
+    bool vacant_is_end = false;
     const Status search = find_in_directory(g, directory_cluster, encoded,
-                                             found, existing, &vacant, &tail);
+                                             found, existing, &vacant, &tail,
+                                             &vacant_is_end);
     if (search == Status::Ok) return Status::AlreadyExists;
     if (search != Status::NotFound) return search;
+    DirectorySlot next_marker = {};
+    bool need_growth = vacant.lba == 0;
+    if (vacant_is_end) {
+        if (vacant.offset < 512 - 32) {
+            next_marker = {vacant.lba, static_cast<uint16_t>(vacant.offset + 32)};
+        } else {
+            const uint32_t sector_index =
+                (vacant.lba - g.first_data_lba) % g.sectors_per_cluster;
+            if (sector_index + 1 < g.sectors_per_cluster) {
+                next_marker = {vacant.lba + 1, 0};
+            } else {
+                uint32_t next = 0;
+                bool end = false;
+                const Status step = chain_next(g, tail, next, end);
+                if (step != Status::Ok) return step;
+                if (end) {
+                    need_growth = true;
+                } else {
+                    uint32_t checked_next = 0;
+                    bool checked_end = false;
+                    const Status check = chain_next(g, next, checked_next, checked_end);
+                    if (check != Status::Ok) return check;
+                    uint32_t lba = 0;
+                    if (!directory_lba(g, next, 0, lba)) return Status::Corrupt;
+                    next_marker = {lba, 0};
+                }
+            }
+        }
+    }
     uint32_t fresh = 0;
-    if (vacant.lba == 0) {
+    if (need_growth) {
         Status status = allocate_chain(1, fresh);
         if (status != Status::Ok) return status;
         uint8_t empty[512];
@@ -367,7 +411,10 @@ Status create_directory_entry(uint32_t directory_cluster, const char* name,
         }
         uint32_t lba = 0;
         if (!directory_lba(g, fresh, 0, lba)) return Status::Corrupt;
-        vacant = {lba, 0};
+        if (vacant.lba == 0) vacant = {lba, 0};
+    } else if (vacant_is_end) {
+        const Status marker = clear_end_marker(g, next_marker);
+        if (marker != Status::Ok) return marker;
     }
     uint8_t published[32];
     for (uint32_t i = 0; i < 32; ++i) published[i] = entry[i];
