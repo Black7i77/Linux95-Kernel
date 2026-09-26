@@ -334,6 +334,16 @@ void test_section_structure()
              dns::Status::MalformedResponse);
     puts("[PASS] all_section_bounds_and_packet_limit");
 }
+
+void test_trailing_undeclared_byte()
+{
+    Packet answer(1);
+    answer.a(nullptr, 7);
+    complete(answer.parse(), dns::Status::Success);
+    answer.add8(0xAA);
+    assert(answer.parse().status == dns::Status::MalformedResponse);
+    puts("[PASS] trailing_undeclared_byte_rejected");
+}
 } // namespace
 
 int main()
@@ -343,4 +353,5 @@ int main()
     test_conflicts_and_cname_rdata();
     test_header_question_and_rcode();
     test_section_structure();
+    test_trailing_undeclared_byte();
 }

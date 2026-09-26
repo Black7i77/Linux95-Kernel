@@ -333,6 +333,9 @@ ParsedResponse parse_response(const uint8_t* message, size_t length,
             return result;
         }
     }
+    if (cursor != length) {
+        return result;
+    }
 
     const uint16_t rcode = flags & 0x000F;
     if (rcode != 0) {
