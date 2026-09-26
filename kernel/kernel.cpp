@@ -37,6 +37,35 @@
 
 namespace {
 
+#ifdef LINUX95_QEMU_UDP_NETWORK_SELF_TEST
+constexpr uint8_t kUdpEchoPayload[] = "linux95-udp-echo";
+bool g_udp_echo_reported = false;
+
+void udp_echo_callback(const linux95::net::Ipv4Address& source,
+                       uint16_t source_port, uint16_t destination_port,
+                       const uint8_t* payload, uint16_t payload_length,
+                       void*)
+{
+    if (source.bytes[0] != 10 || source.bytes[1] != 0 ||
+        source.bytes[2] != 2 || source.bytes[3] != 2 ||
+        source_port != 40000 || destination_port != 40001 ||
+        payload_length != sizeof(kUdpEchoPayload) - 1 ||
+        payload == nullptr) {
+        return;
+    }
+    for (uint16_t i = 0; i < payload_length; ++i) {
+        if (payload[i] != kUdpEchoPayload[i]) {
+            return;
+        }
+    }
+    if (!g_udp_echo_reported) {
+        linux95::debug::write("[PASS] udp_echo_validated\n");
+        linux95::debug::write("[PASS] udp_rx\n");
+        g_udp_echo_reported = true;
+    }
+}
+#endif
+
 void write_decimal(uint32_t value)
 {
     char digits[10];
@@ -307,6 +336,14 @@ extern "C" [[noreturn]] void linux95_higher_half_entry(
 #ifdef LINUX95_QEMU_NETWORK_SELF_TEST
     (void)network::start_ping(
         net::Ipv4Address{{10, 0, 2, 2}});
+#endif
+
+#ifdef LINUX95_QEMU_UDP_NETWORK_SELF_TEST
+    if (network::bind_udp_port(40001, udp_echo_callback, nullptr)) {
+        (void)network::send_udp(net::Ipv4Address{{10, 0, 2, 2}},
+                                40001, 40000, kUdpEchoPayload,
+                                sizeof(kUdpEchoPayload) - 1);
+    }
 #endif
 
     if (framebuffer_result ==

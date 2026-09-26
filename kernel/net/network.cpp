@@ -6,6 +6,7 @@
 #include "net/arp.hpp"
 #include "net/ethernet.hpp"
 #include "net/ipv4.hpp"
+#include "net/udp.hpp"
 
 #include <stdint.h>
 
@@ -25,6 +26,7 @@ constexpr uint8_t kMaxFramesPerPoll = 8;
 constexpr uint16_t kMaxFrameLength = 1518;
 constexpr uint16_t kMaxIpv4Length = 1500;
 constexpr uint8_t kIcmpProtocol = 1;
+constexpr uint8_t kUdpProtocol = 17;
 constexpr uint16_t kPingIdentifier = 0x4C95;
 constexpr uint64_t kArpTimeoutSeconds = 1;
 constexpr uint64_t kReplyTimeoutSeconds = 2;
@@ -40,6 +42,33 @@ net::Ipv4Address g_next_hop{};
 uint64_t g_deadline = 0;
 uint16_t g_next_sequence = 1;
 uint16_t g_next_identification = 1;
+net::udp::bindings::Table g_udp_bindings{};
+struct PendingUdp {
+    bool occupied;
+    net::Ipv4Address next_hop;
+    uint16_t packet_length;
+    uint64_t deadline;
+    uint8_t packet[kMaxIpv4Length];
+};
+PendingUdp g_pending_udp{};
+bool g_udp_tx_reported = false;
+
+void diagnostic(const char* message)
+{
+#ifndef LINUX95_NETWORK_HOST_TEST
+    debug::write(message);
+#else
+    (void)message;
+#endif
+}
+
+void report_udp_tx()
+{
+    if (!g_udp_tx_reported) {
+        diagnostic("[PASS] udp_tx\n");
+        g_udp_tx_reported = true;
+    }
+}
 
 bool mac_equals(
     const net::MacAddress& left,
@@ -195,9 +224,22 @@ void handle_arp(const net::EthernetView& frame)
         net::MacAddress next_hop_mac{};
         if (net::arp::lookup(g_next_hop, next_hop_mac)) {
             if (transmit_echo_request(next_hop_mac)) {
-                debug::write("[PASS] arp_gateway_resolved\n");
+                diagnostic("[PASS] arp_gateway_resolved\n");
             } else {
                 g_ping.state = net::icmp::PingState::HostUnreachable;
+            }
+        }
+    }
+
+    if (g_pending_udp.occupied) {
+        if (pit::uptime_seconds() >= g_pending_udp.deadline) {
+            g_pending_udp.occupied = false;
+        } else if (ipv4_equals(sender_ip, g_pending_udp.next_hop)) {
+            g_pending_udp.occupied = false;
+            if (transmit_ethernet(sender_mac, net::EtherType::Ipv4,
+                                  g_pending_udp.packet,
+                                  g_pending_udp.packet_length)) {
+                report_udp_tx();
             }
         }
     }
@@ -210,23 +252,34 @@ void handle_ipv4(const net::EthernetView& frame)
             frame.payload,
             frame.payload_length,
             packet) ||
-        !ipv4_equals(packet.destination, g_status.ip) ||
-        packet.protocol != kIcmpProtocol ||
-        g_ping.state != net::icmp::PingState::WaitingReply ||
-        !ipv4_equals(packet.source, g_ping.address)) {
+        !ipv4_equals(packet.destination, g_status.ip)) {
         return;
     }
 
-    uint16_t payload_bytes = 0;
-    if (net::icmp::accept_echo_reply(
-            packet.payload,
-            packet.payload_length,
-            kPingIdentifier,
-            g_ping.sequence,
-            payload_bytes)) {
-        g_ping.payload_bytes = payload_bytes;
-        g_ping.state = net::icmp::PingState::ReplyReceived;
-        debug::write("[PASS] icmp_echo_reply\n");
+    if (packet.protocol == kIcmpProtocol) {
+        if (g_ping.state != net::icmp::PingState::WaitingReply ||
+            !ipv4_equals(packet.source, g_ping.address)) {
+            return;
+        }
+        uint16_t payload_bytes = 0;
+        if (net::icmp::accept_echo_reply(
+                packet.payload,
+                packet.payload_length,
+                kPingIdentifier,
+                g_ping.sequence,
+                payload_bytes)) {
+            g_ping.payload_bytes = payload_bytes;
+            g_ping.state = net::icmp::PingState::ReplyReceived;
+            diagnostic("[PASS] icmp_echo_reply\n");
+        }
+    } else if (packet.protocol == kUdpProtocol) {
+        net::udp::DatagramView datagram{};
+        if (net::udp::parse(packet.payload, packet.payload_length,
+                            packet.source, packet.destination, datagram)) {
+            g_udp_bindings.dispatch(packet.source, datagram.source_port,
+                                    datagram.destination_port, datagram.payload,
+                                    datagram.payload_length);
+        }
     }
 }
 
@@ -249,6 +302,9 @@ void dispatch_frame(const uint8_t* bytes, uint16_t length)
 void advance_timeout()
 {
     const uint64_t now = pit::uptime_seconds();
+    if (g_pending_udp.occupied && now >= g_pending_udp.deadline) {
+        g_pending_udp.occupied = false;
+    }
     if (g_ping.state == net::icmp::PingState::ResolvingArp &&
         now >= g_deadline) {
         g_ping.state = net::icmp::PingState::HostUnreachable;
@@ -273,7 +329,10 @@ bool initialize()
     g_deadline = 0;
     g_next_sequence = 1;
     g_next_identification = 1;
+    g_pending_udp.occupied = false;
+    g_udp_tx_reported = false;
     net::arp::reset();
+    g_udp_bindings = net::udp::bindings::Table{};
 
     if (!rtl8139::initialize()) {
         return false;
@@ -285,12 +344,85 @@ bool initialize()
     }
     g_status.online = true;
 
-    debug::write("[PASS] rtl8139_detected\n");
-    debug::write("[PASS] rtl8139_initialized\n");
-    debug::write("[PASS] ethernet_ready\n");
-    debug::write("[PASS] arp_ready\n");
-    debug::write("[PASS] ipv4_ready\n");
-    debug::write("[PASS] icmp_ready\n");
+    diagnostic("[PASS] rtl8139_detected\n");
+    diagnostic("[PASS] rtl8139_initialized\n");
+    diagnostic("[PASS] ethernet_ready\n");
+    diagnostic("[PASS] arp_ready\n");
+    diagnostic("[PASS] ipv4_ready\n");
+    diagnostic("[PASS] icmp_ready\n");
+    diagnostic("[PASS] udp_ready\n");
+    return true;
+}
+
+bool bind_udp_port(uint16_t port, UdpReceiveCallback callback, void* context)
+{
+    return g_udp_bindings.bind(port, callback, context);
+}
+
+bool unbind_udp_port(uint16_t port)
+{
+    return g_udp_bindings.unbind(port);
+}
+
+bool send_udp(const net::Ipv4Address& destination,
+              uint16_t source_port,
+              uint16_t destination_port,
+              const uint8_t* payload,
+              uint16_t payload_length)
+{
+    if (!g_status.online || source_port == 0 || destination_port == 0 ||
+        (payload == nullptr && payload_length != 0) ||
+        payload_length > net::udp::kMaxPayloadLength) {
+        return false;
+    }
+
+    const net::Ipv4Address next_hop = net::ipv4::next_hop(
+        destination, g_status.ip, g_status.netmask, g_status.gateway);
+    net::MacAddress next_hop_mac{};
+    const bool cached = net::arp::lookup(next_hop, next_hop_mac);
+    if (!cached && g_pending_udp.occupied &&
+        pit::uptime_seconds() >= g_pending_udp.deadline) {
+        g_pending_udp.occupied = false;
+    }
+    if (!cached && g_pending_udp.occupied) {
+        return false;
+    }
+
+    uint8_t datagram[net::udp::kHeaderLength + net::udp::kMaxPayloadLength];
+    uint16_t datagram_length = 0;
+    if (!net::udp::build(datagram, sizeof(datagram), g_status.ip,
+                         destination, source_port, destination_port,
+                         payload, payload_length, datagram_length)) {
+        return false;
+    }
+    uint8_t packet[kMaxIpv4Length];
+    uint16_t packet_length = 0;
+    if (!net::ipv4::build(packet, sizeof(packet), g_status.ip, destination,
+                          kUdpProtocol, g_next_identification++, datagram,
+                          datagram_length, packet_length)) {
+        return false;
+    }
+
+    if (cached) {
+        if (!transmit_ethernet(next_hop_mac, net::EtherType::Ipv4,
+                               packet, packet_length)) {
+            return false;
+        }
+        report_udp_tx();
+        return true;
+    }
+
+    for (uint16_t i = 0; i < packet_length; ++i) {
+        g_pending_udp.packet[i] = packet[i];
+    }
+    g_pending_udp.next_hop = next_hop;
+    g_pending_udp.packet_length = packet_length;
+    g_pending_udp.deadline = pit::uptime_seconds() + kArpTimeoutSeconds;
+    g_pending_udp.occupied = true;
+    if (!transmit_arp_request(next_hop)) {
+        g_pending_udp.occupied = false;
+        return false;
+    }
     return true;
 }
 

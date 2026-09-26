@@ -77,6 +77,8 @@ KERNEL_OBJS := \
 	$(BUILD)/arp.o \
 	$(BUILD)/ipv4.o \
 	$(BUILD)/icmp.o \
+	$(BUILD)/udp.o \
+	$(BUILD)/udp_bindings.o \
 	$(BUILD)/network.o \
 	$(BUILD)/memory.o \
 	$(BUILD)/virtual.o \
@@ -103,8 +105,10 @@ KERNEL_OBJS := \
 
 NETWORK_TEST_OBJS := $(subst $(BUILD)/kernel.o,$(BUILD)/kernel-network-test.o,$(KERNEL_OBJS))
 NETWORK_TEST_IMAGE := $(BUILD)/linux95-kernel-network-test.img
+UDP_NETWORK_TEST_OBJS := $(subst $(BUILD)/kernel.o,$(BUILD)/kernel-udp-network-test.o,$(KERNEL_OBJS))
+UDP_NETWORK_TEST_IMAGE := $(BUILD)/linux95-udp-network-test.img
 
-.PHONY: all clean run run-debug test test-qemu prepare-storage-test-image test-host-segments test-host-process test-host-scheduler test-host-user-space test-host-elf test-host-elf-loader-plan test-host-syscall test-host-memory test-host-storage test-host-filesystem test-host-graphics test-host-pci test-host-rtl8139-helpers test-host-kernel-virtual-to-physical test-host-ethernet test-host-arp test-host-ipv4 test-host-icmp test-host-heap test-memory-source test-storage-source test-relocations check-tools
+.PHONY: all clean run run-debug test test-qemu prepare-storage-test-image test-host-segments test-host-process test-host-scheduler test-host-user-space test-host-elf test-host-elf-loader-plan test-host-syscall test-host-memory test-host-storage test-host-filesystem test-host-graphics test-host-pci test-host-rtl8139-helpers test-host-kernel-virtual-to-physical test-host-ethernet test-host-arp test-host-ipv4 test-host-icmp test-host-udp test-host-udp-bindings test-host-network-udp test-host-heap test-memory-source test-storage-source test-relocations check-tools
 
 all: check-tools $(BUILD)/linux95-kernel.img $(BUILD)/user/init.elf $(BUILD)/user/worker.elf
 
@@ -216,6 +220,16 @@ $(BUILD)/kernel-network-test.o: \
 	kernel/filesystem/vfs_self_test.hpp | $(BUILD)
 >$(CXX) $(CXXFLAGS) -DLINUX95_QEMU_NETWORK_SELF_TEST -c $< -o $@
 
+$(BUILD)/kernel-udp-network-test.o: \
+	kernel/kernel.cpp \
+	kernel/boot_info.hpp \
+	kernel/arch/x86_64/segments.hpp \
+	kernel/arch/x86_64/tss.hpp \
+	kernel/filesystem/vfs.hpp \
+	kernel/net/network.hpp \
+	kernel/filesystem/vfs_self_test.hpp | $(BUILD)
+>$(CXX) $(CXXFLAGS) -DLINUX95_QEMU_NETWORK_SELF_TEST -DLINUX95_QEMU_UDP_NETWORK_SELF_TEST -c $< -o $@
+
 $(BUILD)/renderer.o: kernel/graphics/renderer.cpp kernel/graphics/renderer.hpp kernel/graphics/font8x8.hpp kernel/graphics/framebuffer.hpp | $(BUILD)
 >$(CXX) $(CXXFLAGS) -c $< -o $@
 
@@ -285,7 +299,13 @@ $(BUILD)/ipv4.o: kernel/net/ipv4.cpp kernel/net/ipv4.hpp kernel/net/net_types.hp
 $(BUILD)/icmp.o: kernel/net/icmp.cpp kernel/net/icmp.hpp kernel/net/net_types.hpp | $(BUILD)
 >$(CXX) $(CXXFLAGS) -c $< -o $@
 
-$(BUILD)/network.o: kernel/net/network.cpp kernel/net/network.hpp kernel/net/arp.hpp kernel/net/ethernet.hpp kernel/net/icmp.hpp kernel/net/ipv4.hpp kernel/drivers/rtl8139.hpp kernel/arch/debug.hpp kernel/arch/pit.hpp | $(BUILD)
+$(BUILD)/udp.o: kernel/net/udp.cpp kernel/net/udp.hpp kernel/net/net_types.hpp | $(BUILD)
+>$(CXX) $(CXXFLAGS) -c $< -o $@
+
+$(BUILD)/udp_bindings.o: kernel/net/udp_bindings.cpp kernel/net/udp_bindings.hpp kernel/net/net_types.hpp | $(BUILD)
+>$(CXX) $(CXXFLAGS) -c $< -o $@
+
+$(BUILD)/network.o: kernel/net/network.cpp kernel/net/network.hpp kernel/net/arp.hpp kernel/net/ethernet.hpp kernel/net/icmp.hpp kernel/net/ipv4.hpp kernel/net/udp.hpp kernel/net/udp_bindings.hpp kernel/drivers/rtl8139.hpp kernel/arch/debug.hpp kernel/arch/pit.hpp | $(BUILD)
 >$(CXX) $(CXXFLAGS) -c $< -o $@
 
 
@@ -423,6 +443,24 @@ $(BUILD)/host-icmp-test: tests/host/icmp_test.cpp kernel/net/icmp.cpp kernel/net
 test-host-icmp: $(BUILD)/host-icmp-test
 >$(BUILD)/host-icmp-test
 
+$(BUILD)/host-udp-test: tests/host/udp_test.cpp kernel/net/udp.cpp kernel/net/udp.hpp kernel/net/net_types.hpp | $(BUILD)
+>$(CXX) $(HOST_CXXFLAGS) tests/host/udp_test.cpp kernel/net/udp.cpp -o $@
+
+test-host-udp: $(BUILD)/host-udp-test
+>$(BUILD)/host-udp-test
+
+$(BUILD)/host-udp-bindings-test: tests/host/udp_bindings_test.cpp kernel/net/udp_bindings.cpp kernel/net/udp_bindings.hpp kernel/net/net_types.hpp | $(BUILD)
+>$(CXX) $(HOST_CXXFLAGS) tests/host/udp_bindings_test.cpp kernel/net/udp_bindings.cpp -o $@
+
+test-host-udp-bindings: $(BUILD)/host-udp-bindings-test
+>$(BUILD)/host-udp-bindings-test
+
+$(BUILD)/host-network-udp-test: tests/host/network_udp_test.cpp kernel/net/network.cpp kernel/net/network.hpp kernel/net/udp.cpp kernel/net/udp_bindings.cpp kernel/net/arp.cpp kernel/net/ethernet.cpp kernel/net/ipv4.cpp kernel/net/icmp.cpp | $(BUILD)
+>$(CXX) $(HOST_CXXFLAGS) -DLINUX95_NETWORK_HOST_TEST tests/host/network_udp_test.cpp kernel/net/network.cpp kernel/net/udp.cpp kernel/net/udp_bindings.cpp kernel/net/arp.cpp kernel/net/ethernet.cpp kernel/net/ipv4.cpp kernel/net/icmp.cpp -o $@
+
+test-host-network-udp: $(BUILD)/host-network-udp-test
+>$(BUILD)/host-network-udp-test
+
 $(BUILD)/host-ata-helpers-test: tests/host/ata_helpers_test.cpp | $(BUILD)
 >$(CXX) $(HOST_CXXFLAGS) $< -o $@
 
@@ -543,6 +581,17 @@ $(BUILD)/kernel-network-test.bin: $(BUILD)/kernel-network-test.elf
 		exit 1; \
 	}
 
+$(BUILD)/kernel-udp-network-test.elf: $(UDP_NETWORK_TEST_OBJS) linker.ld
+>$(LD) -nostdlib -z max-page-size=0x1000 -T linker.ld -o $@ $(UDP_NETWORK_TEST_OBJS)
+>@entry=$$($(READELF) -h $@ | awk '/Entry point address:/ {print $$4}'); \
+	test "$$entry" = "0x100000" || { echo "ERROR: bad UDP-test kernel entry: $$entry"; exit 1; }
+
+$(BUILD)/kernel-udp-network-test.bin: $(BUILD)/kernel-udp-network-test.elf
+>$(OBJCOPY) -O binary $< $@
+>@size=$$(stat -c%s $@); \
+	max=$$(( $(KERNEL_SECTORS) * $(SECTOR) )); \
+	test $$size -le $$max || { echo "ERROR: UDP-test kernel too large: $$size > $$max"; exit 1; }
+
 $(BUILD)/linux95-kernel.img: \
 	$(BUILD)/stage1.bin \
 	$(BUILD)/stage2.bin \
@@ -563,6 +612,15 @@ $(NETWORK_TEST_IMAGE): \
 >dd if=$(BUILD)/stage1.bin of=$@ bs=$(SECTOR) seek=0 conv=notrunc status=none
 >dd if=$(BUILD)/stage2.bin of=$@ bs=$(SECTOR) seek=1 conv=notrunc status=none
 >dd if=$(BUILD)/kernel-network-test.bin of=$@ bs=$(SECTOR) seek=$(KERNEL_LBA) conv=notrunc status=none
+
+$(UDP_NETWORK_TEST_IMAGE): \
+	$(BUILD)/stage1.bin \
+	$(BUILD)/stage2.bin \
+	$(BUILD)/kernel-udp-network-test.bin
+>dd if=/dev/zero of=$@ bs=$(SECTOR) count=$(IMAGE_SECTORS) status=none
+>dd if=$(BUILD)/stage1.bin of=$@ bs=$(SECTOR) seek=0 conv=notrunc status=none
+>dd if=$(BUILD)/stage2.bin of=$@ bs=$(SECTOR) seek=1 conv=notrunc status=none
+>dd if=$(BUILD)/kernel-udp-network-test.bin of=$@ bs=$(SECTOR) seek=$(KERNEL_LBA) conv=notrunc status=none
 
 $(STORAGE_TEST_IMAGE): tests/prepare_fat32_image.py $(BUILD)/user/init.elf $(BUILD)/user/worker.elf | $(BUILD)
 >@for tool in mkfs.fat mmd mcopy; do \
@@ -595,7 +653,8 @@ test-preemption-source:
 >$(PYTHON) tests/preemption_source_checks.py
 
 test: test-preemption-source
-test: all test-host-memory test-host-storage test-host-heap test-host-segments test-host-process test-host-scheduler test-host-user-space test-host-elf test-host-elf-loader-plan test-host-syscall test-host-filesystem test-host-graphics test-host-pci test-host-rtl8139-helpers test-host-kernel-virtual-to-physical test-host-ethernet test-host-arp test-host-ipv4 test-host-icmp
+test: all test-host-memory test-host-storage test-host-heap test-host-segments test-host-process test-host-scheduler test-host-user-space test-host-elf test-host-elf-loader-plan test-host-syscall test-host-filesystem test-host-graphics test-host-pci test-host-rtl8139-helpers test-host-kernel-virtual-to-physical test-host-ethernet test-host-arp test-host-ipv4 test-host-icmp test-host-udp test-host-udp-bindings test-host-network-udp
+>$(PYTHON) tests/qemu_smoke_policy_test.py
 >$(PYTHON) tests/source_checks.py
 >$(PYTHON) tests/image_checks.py
 >$(PYTHON) tests/memory_source_checks.py
@@ -603,9 +662,10 @@ test: all test-host-memory test-host-storage test-host-heap test-host-segments t
 >$(PYTHON) tests/filesystem_source_checks.py
 >$(PYTHON) tests/relocation_checks.py
 
-test-qemu: all $(NETWORK_TEST_IMAGE) prepare-storage-test-image
+test-qemu: all $(NETWORK_TEST_IMAGE) $(UDP_NETWORK_TEST_IMAGE) prepare-storage-test-image
 >@command -v $(QEMU) >/dev/null || { echo "Missing tool: $(QEMU)"; exit 1; }
 >$(PYTHON) tests/qemu_smoke.py
+>$(PYTHON) tests/qemu_smoke.py --udp-network-test
 >$(PYTHON) tests/qemu_smoke.py --without-network
 >$(PYTHON) tests/qemu_smoke.py --process-preemption-test
 

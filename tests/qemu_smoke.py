@@ -1,26 +1,34 @@
 #!/usr/bin/env python3
 
 from pathlib import Path
+import socket
 import shutil
 import subprocess
 import sys
+import threading
 import time
+
+from qemu_smoke_policy import grace_complete
 
 WITHOUT_NETWORK = "--without-network" in sys.argv[1:]
 PROCESS_SELF_TEST = "--process-self-test" in sys.argv[1:]
 PROCESS_FAULT_TEST = "--process-fault-test" in sys.argv[1:]
 PROCESS_PREEMPTION_TEST = "--process-preemption-test" in sys.argv[1:]
 WITHOUT_USER_PROGRAMS = "--without-user-programs" in sys.argv[1:]
+UDP_NETWORK_TEST = "--udp-network-test" in sys.argv[1:]
+UDP_PAYLOAD = b"linux95-udp-echo"
+UDP_INVALID_REPLY = b"linux95-udp-evil"
 
 if sum((WITHOUT_NETWORK, PROCESS_SELF_TEST, PROCESS_FAULT_TEST,
-        PROCESS_PREEMPTION_TEST, WITHOUT_USER_PROGRAMS)) > 1 or any(
+        PROCESS_PREEMPTION_TEST, WITHOUT_USER_PROGRAMS,
+        UDP_NETWORK_TEST)) > 1 or any(
         argument not in ("--without-network", "--process-self-test",
                          "--process-fault-test", "--process-preemption-test",
-                         "--without-user-programs")
+                         "--without-user-programs", "--udp-network-test")
        for argument in sys.argv[1:]):
     print("usage: qemu_smoke.py [--without-network] [--process-self-test] "
           "[--process-fault-test] [--process-preemption-test] "
-          "[--without-user-programs]")
+          "[--without-user-programs] [--udp-network-test]")
     sys.exit(2)
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -28,6 +36,8 @@ IMAGE = ROOT / "build" / (
     "linux95-kernel.img"
     if WITHOUT_NETWORK or PROCESS_SELF_TEST or PROCESS_FAULT_TEST or
             PROCESS_PREEMPTION_TEST or WITHOUT_USER_PROGRAMS
+    else "linux95-udp-network-test.img"
+    if UDP_NETWORK_TEST
     else "linux95-kernel-network-test.img"
 )
 STORAGE_IMAGE = ROOT / "build" / (
@@ -97,6 +107,36 @@ if not STORAGE_IMAGE.is_file():
 
 LOG.unlink(missing_ok=True)
 
+echo_socket = None
+echo_thread = None
+echo_result = {"received": False, "replies_sent": 0, "error": None}
+if UDP_NETWORK_TEST:
+    try:
+        echo_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        echo_socket.bind(("127.0.0.1", 40000))
+        echo_socket.settimeout(12.0)
+    except OSError as error:
+        print("qemu smoke test: FAIL")
+        print(f"UDP echo responder setup failed: {error}")
+        sys.exit(1)
+
+    def echo_once():
+        try:
+            payload, peer = echo_socket.recvfrom(2048)
+            if payload != UDP_PAYLOAD:
+                echo_result["error"] = f"unexpected UDP payload: {payload!r}"
+                return
+            echo_result["received"] = True
+            for reply in (UDP_INVALID_REPLY, UDP_PAYLOAD, UDP_PAYLOAD):
+                echo_socket.sendto(reply, peer)
+                echo_result["replies_sent"] += 1
+                time.sleep(0.15)
+        except OSError as error:
+            echo_result["error"] = str(error)
+
+    echo_thread = threading.Thread(target=echo_once, daemon=True)
+    echo_thread.start()
+
 cmd = [
     QEMU,
     "-machine", "pc",
@@ -109,7 +149,6 @@ cmd = [
     "-serial", "none",
     "-monitor", "none",
     "-no-reboot",
-    "-no-shutdown",
     "-debugcon", f"file:{LOG}",
     "-global", "isa-debugcon.iobase=0xe9",
 ]
@@ -135,6 +174,8 @@ early_exit = None
 completion_marker = (
     "[PASS] preemptive round robin"
     if PROCESS_PREEMPTION_TEST
+    else "[PASS] udp_rx"
+    if UDP_NETWORK_TEST
     else "[PASS] desktop remained online"
     if PROCESS_SELF_TEST or PROCESS_FAULT_TEST
     else ("[PASS] desktop_online"
@@ -151,14 +192,24 @@ try:
 
         if LOG.exists():
             content = LOG.read_text(errors="replace")
-            if completion_marker in content:
-                if not (PROCESS_SELF_TEST or PROCESS_FAULT_TEST or
-                        WITHOUT_USER_PROGRAMS):
+            if completion_marker in content and (
+                    not UDP_NETWORK_TEST or
+                    "[PASS] icmp_echo_reply" in content):
+                if UDP_NETWORK_TEST:
+                    if completion_seen_at is None:
+                        completion_seen_at = time.monotonic()
+                    elif grace_complete(completion_seen_at, time.monotonic(),
+                                        deadline):
+                        saw_completion = True
+                        break
+                elif not (PROCESS_SELF_TEST or PROCESS_FAULT_TEST or
+                          WITHOUT_USER_PROGRAMS):
                     saw_completion = True
                     break
-                if completion_seen_at is None:
+                elif completion_seen_at is None:
                     completion_seen_at = time.monotonic()
-                elif time.monotonic() - completion_seen_at >= 1.0:
+                elif grace_complete(completion_seen_at, time.monotonic(),
+                                    deadline):
                     saw_completion = True
                     break
 
@@ -171,6 +222,9 @@ finally:
         except subprocess.TimeoutExpired:
             proc.kill()
             proc.wait(timeout=2)
+    if echo_socket is not None:
+        echo_socket.close()
+        echo_thread.join(timeout=1)
 
 stderr = ""
 if proc.stderr is not None:
@@ -187,12 +241,37 @@ if early_exit is not None and not saw_completion:
     print(content or "(empty)")
     sys.exit(1)
 
+if not saw_completion:
+    print("qemu smoke test: FAIL")
+    print("completion observation did not finish before deadline")
+    print("--- debug log ---")
+    print(content or "(empty)")
+    sys.exit(1)
+
 if "[PANIC]" in content:
     print("qemu smoke test: FAIL")
     print("kernel panic marker found")
     print("--- debug log ---")
     print(content)
     sys.exit(1)
+
+if UDP_NETWORK_TEST:
+    if (not echo_result["received"] or echo_result["replies_sent"] != 3 or
+            echo_result["error"] is not None):
+        print("qemu smoke test: FAIL")
+        print("UDP echo responder did not receive exact request and send all replies:",
+              echo_result["error"] or "no datagram received")
+        print("--- debug log ---")
+        print(content or "(empty)")
+        sys.exit(1)
+    if (content.count("[BOOT] low_kernel_entry") != 1 or
+            "#DF" in content or "double fault" in content.lower() or
+            "triple fault" in content.lower() or "reset" in content.lower()):
+        print("qemu smoke test: FAIL")
+        print("UDP test encountered a reset or fatal fault")
+        print("--- debug log ---")
+        print(content or "(empty)")
+        sys.exit(1)
 
 required = [
     "[BOOT] low_kernel_entry",
@@ -257,6 +336,10 @@ else:
         "[PASS] icmp_echo_reply",
     ])
 
+if UDP_NETWORK_TEST:
+    required.extend(["[PASS] udp_ready", "[PASS] udp_tx",
+                     "[PASS] udp_echo_validated", "[PASS] udp_rx"])
+
 if PROCESS_SELF_TEST:
     required.extend([
         "[PASS] entered ring3",
@@ -309,6 +392,40 @@ if missing:
         print("--- qemu stderr ---")
         print(stderr.strip())
     sys.exit(1)
+
+if UDP_NETWORK_TEST:
+    ordered_markers = [
+        "[PASS] rtl8139_detected",
+        "[PASS] rtl8139_initialized",
+        "[PASS] ethernet_ready",
+        "[PASS] arp_ready",
+        "[PASS] ipv4_ready",
+        "[PASS] icmp_ready",
+        "[PASS] udp_ready",
+        "[PASS] desktop_online",
+        "[PASS] arp_gateway_resolved",
+        "[PASS] udp_tx",
+        "[PASS] udp_echo_validated",
+        "[PASS] udp_rx",
+    ]
+    positions = [content.find(marker) for marker in ordered_markers]
+    bad_order = positions != sorted(positions)
+    bad_counts = [marker for marker in ordered_markers
+                  if content.count(marker) != 1]
+    if bad_order or bad_counts:
+        print("qemu smoke test: FAIL")
+        if positions[-1] < positions[-2]:
+            print("udp_rx preceded callback payload validation")
+        if content.count("[PASS] udp_echo_validated") != 1:
+            print("udp_echo_validated was not one-shot:",
+                  content.count("[PASS] udp_echo_validated"))
+        if content.count("[PASS] udp_rx") != 1:
+            print("udp_rx was not one-shot:", content.count("[PASS] udp_rx"))
+        if not bad_order and not bad_counts:
+            print("UDP completion markers were malformed")
+        print("--- debug log ---")
+        print(content or "(empty)")
+        sys.exit(1)
 
 if PROCESS_SELF_TEST:
     ordered_markers = [
@@ -472,4 +589,6 @@ else:
     print("[PASS] RTL8139 network stack initialized")
     print("[PASS] ARP gateway resolved at 10.0.2.2")
     print("[PASS] ICMP echo reply received from 10.0.2.2")
+    if UDP_NETWORK_TEST:
+        print("[PASS] UDP echo received through RTL8139")
 print("QEMU smoke test: PASS")

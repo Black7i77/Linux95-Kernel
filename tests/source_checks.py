@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 from pathlib import Path
+import re
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -93,6 +94,36 @@ def require_network_coordinator_contract():
     desktop_source = (ROOT / "kernel/gui/desktop.cpp").read_text()
     if "network::poll();" not in desktop_source:
         raise SystemExit("FAIL: network::poll() missing from graphical runtime loop")
+
+def require_udp_contract():
+    sources = {
+        path: (ROOT / path).read_text()
+        for path in (
+            "kernel/net/udp.hpp", "kernel/net/udp.cpp",
+            "kernel/net/udp_bindings.hpp", "kernel/net/udp_bindings.cpp",
+            "kernel/net/network.cpp",
+        )
+    }
+    for path, token in (
+        ("kernel/net/udp.hpp", "kHeaderLength = 8"),
+        ("kernel/net/udp.hpp", "kMaxPayloadLength = 1472"),
+        ("kernel/net/udp_bindings.hpp", "kMaxUdpBindings = 8"),
+        ("kernel/net/network.cpp", "kUdpProtocol = 17"),
+        ("kernel/net/network.cpp", "packet.protocol == kUdpProtocol"),
+    ):
+        if token not in sources[path]:
+            raise SystemExit(f"FAIL: UDP contract missing: {path}: {token}")
+    for path, source in sources.items():
+        if re.search(r'^\s*#\s*include\s*[<"][^>"]*dns', source,
+                     re.IGNORECASE | re.MULTILINE):
+            raise SystemExit(f"FAIL: DNS dependency in UDP transport: {path}")
+        if re.search(r'\b(?:new|delete|malloc|calloc|realloc|free)\s*(?:\(|\[)',
+                     source):
+            raise SystemExit(f"FAIL: dynamic allocation in UDP transport: {path}")
+    makefile = (ROOT / "Makefile").read_text()
+    qemu_recipe = makefile.split("test-qemu:", 1)[1].split("\nrun:", 1)[0]
+    if "tests/qemu_smoke.py --udp-network-test" not in qemu_recipe:
+        raise SystemExit("FAIL: make test-qemu lacks real UDP echo mode")
 
 require("kernel/boot_info.hpp", "static_assert(sizeof(FramebufferInfo) == 28")
 require("kernel/boot_info.hpp", "static_assert(sizeof(BootInfo) == 45")
@@ -238,6 +269,7 @@ if "FAULT.ELF" in kernel_startup:
 
 require_rtl8139_hardware_isolation()
 require_network_coordinator_contract()
+require_udp_contract()
 
 if "Linux95 Kernel v0.1" in (ROOT / "kernel/kernel.cpp").read_text():
     raise SystemExit("FAIL: stale v0.1 kernel banner found")
