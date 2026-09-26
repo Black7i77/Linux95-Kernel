@@ -306,6 +306,38 @@ void test_retry_timeout_and_wraparound()
     puts("[PASS] two_second_retry_final_timeout_and_tick_wraparound");
 }
 
+void test_payload_without_transaction_id_is_ignored()
+{
+    fake::rate = 119;
+    fake::now = 1000;
+    fake::begin();
+    const uint16_t first_id = fake::id(fake::sent.back());
+    std::vector<uint8_t> empty;
+    fake::deliver(empty);
+    assert(dns::lookup_status() == dns::Status::Pending);
+
+    fake::now = 1237;
+    std::vector<uint8_t> one_byte{static_cast<uint8_t>(first_id >> 8)};
+    fake::deliver(one_byte);
+    assert(dns::lookup_status() == dns::Status::Pending);
+    dns::poll();
+    assert(fake::sent.size() == 1);
+    fake::now = 1238;
+    dns::poll();
+    assert(fake::sent.size() == 2);
+    assert(fake::id(fake::sent.back()) == static_cast<uint16_t>(first_id + 1));
+
+    fake::now = 1475;
+    fake::deliver(empty);
+    dns::poll();
+    assert(dns::lookup_status() == dns::Status::Pending);
+    fake::now = 1476;
+    dns::poll();
+    assert(dns::lookup_status() == dns::Status::TimedOut);
+    assert(fake::sent.size() == 2);
+    puts("[PASS] sub_id_payload_ignored_without_deadline_extension");
+}
+
 void test_cname_followup_budget()
 {
     fake::rate = 119;
@@ -353,6 +385,7 @@ int main()
     test_initialization_and_transport_failures();
     test_query_busy_configuration_and_results();
     test_peer_id_question_and_statuses();
+    test_payload_without_transaction_id_is_ignored();
     test_retry_timeout_and_wraparound();
     test_cname_followup_budget();
     return 0;

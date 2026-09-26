@@ -77,7 +77,8 @@ void on_udp(const net::Ipv4Address& source, uint16_t source_port,
 {
     if (g_resolver.status != Status::Pending || !g_resolver.awaiting ||
         !addresses_equal(source, g_resolver.server) ||
-        source_port != kServerPort || destination_port != kClientPort) {
+        source_port != kServerPort || destination_port != kClientPort ||
+        payload_length < 2) {
         return;
     }
     const ParsedResponse parsed = parse_response(
