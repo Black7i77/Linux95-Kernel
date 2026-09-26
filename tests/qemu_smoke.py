@@ -15,6 +15,7 @@ PROCESS_PREEMPTION_TEST = "--process-preemption-test" in sys.argv[1:]
 WITHOUT_USER_PROGRAMS = "--without-user-programs" in sys.argv[1:]
 UDP_NETWORK_TEST = "--udp-network-test" in sys.argv[1:]
 UDP_PAYLOAD = b"linux95-udp-echo"
+UDP_INVALID_REPLY = b"linux95-udp-evil"
 
 if sum((WITHOUT_NETWORK, PROCESS_SELF_TEST, PROCESS_FAULT_TEST,
         PROCESS_PREEMPTION_TEST, WITHOUT_USER_PROGRAMS,
@@ -106,7 +107,7 @@ LOG.unlink(missing_ok=True)
 
 echo_socket = None
 echo_thread = None
-echo_result = {"received": False, "error": None}
+echo_result = {"received": False, "replies_sent": 0, "error": None}
 if UDP_NETWORK_TEST:
     try:
         echo_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -124,7 +125,10 @@ if UDP_NETWORK_TEST:
                 echo_result["error"] = f"unexpected UDP payload: {payload!r}"
                 return
             echo_result["received"] = True
-            echo_socket.sendto(payload, peer)
+            for reply in (UDP_INVALID_REPLY, UDP_PAYLOAD, UDP_PAYLOAD):
+                echo_socket.sendto(reply, peer)
+                echo_result["replies_sent"] += 1
+                time.sleep(0.15)
         except OSError as error:
             echo_result["error"] = str(error)
 
@@ -190,11 +194,17 @@ try:
             if completion_marker in content and (
                     not UDP_NETWORK_TEST or
                     "[PASS] icmp_echo_reply" in content):
-                if not (PROCESS_SELF_TEST or PROCESS_FAULT_TEST or
-                        WITHOUT_USER_PROGRAMS):
+                if UDP_NETWORK_TEST:
+                    if completion_seen_at is None:
+                        completion_seen_at = time.monotonic()
+                    elif time.monotonic() - completion_seen_at >= 1.0:
+                        saw_completion = True
+                        break
+                elif not (PROCESS_SELF_TEST or PROCESS_FAULT_TEST or
+                          WITHOUT_USER_PROGRAMS):
                     saw_completion = True
                     break
-                if completion_seen_at is None:
+                elif completion_seen_at is None:
                     completion_seen_at = time.monotonic()
                 elif time.monotonic() - completion_seen_at >= 1.0:
                     saw_completion = True
@@ -236,9 +246,10 @@ if "[PANIC]" in content:
     sys.exit(1)
 
 if UDP_NETWORK_TEST:
-    if (not echo_result["received"] or echo_result["error"] is not None):
+    if (not echo_result["received"] or echo_result["replies_sent"] != 3 or
+            echo_result["error"] is not None):
         print("qemu smoke test: FAIL")
-        print("UDP echo responder did not receive and return exact payload:",
+        print("UDP echo responder did not receive exact request and send all replies:",
               echo_result["error"] or "no datagram received")
         print("--- debug log ---")
         print(content or "(empty)")
@@ -388,10 +399,20 @@ if UDP_NETWORK_TEST:
         "[PASS] udp_rx",
     ]
     positions = [content.find(marker) for marker in ordered_markers]
-    if positions != sorted(positions) or any(
-            content.count(marker) != 1 for marker in ordered_markers):
+    bad_order = positions != sorted(positions)
+    bad_counts = [marker for marker in ordered_markers
+                  if content.count(marker) != 1]
+    if bad_order or bad_counts:
         print("qemu smoke test: FAIL")
-        print("UDP completion markers were malformed or out of order")
+        if positions[-1] < positions[-2]:
+            print("udp_rx preceded callback payload validation")
+        if content.count("[PASS] udp_echo_validated") != 1:
+            print("udp_echo_validated was not one-shot:",
+                  content.count("[PASS] udp_echo_validated"))
+        if content.count("[PASS] udp_rx") != 1:
+            print("udp_rx was not one-shot:", content.count("[PASS] udp_rx"))
+        if not bad_order and not bad_counts:
+            print("UDP completion markers were malformed")
         print("--- debug log ---")
         print(content or "(empty)")
         sys.exit(1)

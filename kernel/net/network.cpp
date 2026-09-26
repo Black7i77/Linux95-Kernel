@@ -52,7 +52,6 @@ struct PendingUdp {
 };
 PendingUdp g_pending_udp{};
 bool g_udp_tx_reported = false;
-bool g_udp_rx_reported = false;
 
 void diagnostic(const char* message)
 {
@@ -277,14 +276,9 @@ void handle_ipv4(const net::EthernetView& frame)
         net::udp::DatagramView datagram{};
         if (net::udp::parse(packet.payload, packet.payload_length,
                             packet.source, packet.destination, datagram)) {
-            if (g_udp_bindings.dispatch(packet.source, datagram.source_port,
-                                        datagram.destination_port,
-                                        datagram.payload,
-                                        datagram.payload_length) &&
-                !g_udp_rx_reported) {
-                diagnostic("[PASS] udp_rx\n");
-                g_udp_rx_reported = true;
-            }
+            g_udp_bindings.dispatch(packet.source, datagram.source_port,
+                                    datagram.destination_port, datagram.payload,
+                                    datagram.payload_length);
         }
     }
 }
@@ -337,7 +331,6 @@ bool initialize()
     g_next_identification = 1;
     g_pending_udp.occupied = false;
     g_udp_tx_reported = false;
-    g_udp_rx_reported = false;
     net::arp::reset();
     g_udp_bindings = net::udp::bindings::Table{};
 

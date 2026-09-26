@@ -21,7 +21,7 @@ class Table {
 public:
     bool bind(uint16_t port, ReceiveCallback callback, void* context);
     bool unbind(uint16_t port);
-    bool dispatch(const Ipv4Address& source, uint16_t source_port,
+    void dispatch(const Ipv4Address& source, uint16_t source_port,
                   uint16_t destination_port, const uint8_t* payload,
                   uint16_t payload_length);
 

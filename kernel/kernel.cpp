@@ -39,6 +39,7 @@ namespace {
 
 #ifdef LINUX95_QEMU_UDP_NETWORK_SELF_TEST
 constexpr uint8_t kUdpEchoPayload[] = "linux95-udp-echo";
+bool g_udp_echo_reported = false;
 
 void udp_echo_callback(const linux95::net::Ipv4Address& source,
                        uint16_t source_port, uint16_t destination_port,
@@ -57,7 +58,11 @@ void udp_echo_callback(const linux95::net::Ipv4Address& source,
             return;
         }
     }
-    linux95::debug::write("[PASS] udp_echo_validated\n");
+    if (!g_udp_echo_reported) {
+        linux95::debug::write("[PASS] udp_echo_validated\n");
+        linux95::debug::write("[PASS] udp_rx\n");
+        g_udp_echo_reported = true;
+    }
 }
 #endif
 
