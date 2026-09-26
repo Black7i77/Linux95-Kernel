@@ -69,12 +69,20 @@ Status write_raw(const helpers::BpbGeometry& g, uint32_t cluster,
 }
 
 Status chain_next(const helpers::BpbGeometry& g, uint32_t cluster,
-                  uint32_t& next, bool& end)
+                  uint32_t& next, bool& end, bool check_copies = false)
 {
     uint32_t raw = 0;
     const Status status = read_entry(g, cluster, 0, raw);
     if (status != Status::Ok) return status;
     const uint32_t value = helpers::fat28(raw);
+    if (check_copies) {
+        for (uint32_t copy = 1; copy < g.fat_count; ++copy) {
+            uint32_t mirrored = 0;
+            const Status read = read_entry(g, cluster, copy, mirrored);
+            if (read != Status::Ok) return read;
+            if (helpers::fat28(mirrored) != value) return Status::Corrupt;
+        }
+    }
     const auto kind = helpers::classify_fat_entry(value);
     if (kind == helpers::FatEntryKind::EndOfChain) {
         end = true; next = 0; return Status::Ok;
@@ -269,7 +277,25 @@ Status write_file(const char* path, const uint8_t* data, size_t size)
     const uint32_t old_cluster = resolved.exists
         ? (static_cast<uint32_t>(helpers::le16(resolved.entry + 20) & 0x0fffu) << 16) |
           helpers::le16(resolved.entry + 26) : 0;
-    if (old_cluster != 0 && !valid_cluster(g, old_cluster)) return Status::Corrupt;
+    if (resolved.exists) {
+        const uint32_t old_size = helpers::le32(resolved.entry + 28);
+        uint32_t old_clusters = 0;
+        status = file_cluster_count(old_size, cluster_bytes, old_clusters);
+        if (status != Status::Ok) return status;
+        if ((old_clusters == 0) != (old_cluster == 0) ||
+            old_clusters > g.cluster_count ||
+            (old_cluster != 0 && !valid_cluster(g, old_cluster)))
+            return Status::Corrupt;
+        uint32_t current = old_cluster;
+        for (uint32_t walked = 0; walked < old_clusters; ++walked) {
+            uint32_t next = 0;
+            bool end = false;
+            status = chain_next(g, current, next, end, true);
+            if (status != Status::Ok) return status;
+            if (end != (walked + 1 == old_clusters)) return Status::Corrupt;
+            current = next;
+        }
+    }
 
     uint32_t fresh = 0;
     status = allocate_chain(clusters, fresh);

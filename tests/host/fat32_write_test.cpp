@@ -524,7 +524,7 @@ int main() {
         size_t(UINT32_MAX) + 1u) == Status::Unsupported);
     assert(write_attempt_count() == 0);
     check_old_file();
-    assert(write::write_file("DOCS/FILE.TXT", nullptr, 1) != Status::Ok);
+    assert(write::write_file("DOCS/FILE.TXT", nullptr, 1) == Status::Unsupported);
     assert(write_attempt_count() == 0);
     assert(write::write_file("DOCS/BAD?.TXT", bytes, 1) == Status::InvalidName);
     assert(write_attempt_count() == 0);
@@ -532,6 +532,58 @@ int main() {
     assert(write::touch("DOCS/NEW.TXT") == Status::Unsupported);
     assert(write::write_file("DOCS/NEW.TXT", bytes, 1) == Status::Unsupported);
     assert(write_attempt_count() == 0);
+
+    // Malformed old metadata must be rejected before copy-on-write allocates.
+    // Each case checks the raw entry, both FAT copies, and old data sectors.
+    struct CorruptOldFile {
+        uint32_t first;
+        uint32_t size;
+        uint32_t link4;
+        uint32_t link5;
+    };
+    const CorruptOldFile corrupt_old_files[] = {
+        {0, 1024, 5, 0x0fffffffu},           // nonempty file without a chain
+        {4, 1024, 0x0ffffff7u, 0x0fffffffu}, // bad cluster
+        {4, 1024, 0x0ffffff0u, 0x0fffffffu}, // reserved link
+        {4, 1024, 5, 4},                    // cycle
+        {4, 1024, 0x0fffffffu, 0x0fffffffu}, // chain too short
+        {4, 512, 5, 0x0fffffffu},           // chain too long
+        {4, 0, 5, 0x0fffffffu},             // empty file with a chain
+    };
+    for (const CorruptOldFile& old : corrupt_old_files) {
+        reset(); mounted(); seed_file_chain();
+        second_root[12] = 0x5a; second_root[24] = 0x77;
+        second_root[20] = static_cast<uint8_t>(old.first >> 16);
+        second_root[21] = static_cast<uint8_t>(old.first >> 24);
+        second_root[26] = static_cast<uint8_t>(old.first);
+        second_root[27] = static_cast<uint8_t>(old.first >> 8);
+        put32(second_root, 28, old.size);
+        for (uint32_t copy = 0; copy < 2; ++copy) {
+            put32(fat[copy], 16, old.link4);
+            put32(fat[copy], 20, old.link5);
+        }
+        uint8_t saved_entry[32], saved_fat[2][512], saved_data[2][512];
+        memcpy(saved_entry, second_root, sizeof saved_entry);
+        memcpy(saved_fat, fat, sizeof saved_fat);
+        memcpy(saved_data[0], file_a, 512);
+        memcpy(saved_data[1], file_b, 512);
+        assert(write::write_file("DOCS/FILE.TXT", bytes, 17) == Status::Corrupt);
+        assert(write_attempt_count() == 0 && writes == 0);
+        assert(memcmp(second_root, saved_entry, sizeof saved_entry) == 0);
+        assert(memcmp(fat, saved_fat, sizeof saved_fat) == 0);
+        assert(memcmp(file_a, saved_data[0], 512) == 0);
+        assert(memcmp(file_b, saved_data[1], 512) == 0);
+    }
+    reset(); mounted(); seed_file_chain();
+    put32(fat[1], 16, 0x0ffffff7u); // malformed link in mirrored copy only
+    uint8_t saved_entry[32], saved_fat[2][512];
+    memcpy(saved_entry, second_root, sizeof saved_entry);
+    memcpy(saved_fat, fat, sizeof saved_fat);
+    assert(write::write_file("DOCS/FILE.TXT", bytes, 17) == Status::Corrupt);
+    assert(write_attempt_count() == 0 && writes == 0);
+    assert(memcmp(second_root, saved_entry, sizeof saved_entry) == 0);
+    assert(memcmp(fat, saved_fat, sizeof saved_fat) == 0);
+    check_old_file();
 
     // Every prepublication failure retains the original entry and bytes.
     reset(); mounted(); seed_file_chain();
