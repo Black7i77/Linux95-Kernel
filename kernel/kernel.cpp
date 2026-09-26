@@ -350,6 +350,10 @@ extern "C" [[noreturn]] void linux95_higher_half_entry(
     }
 #endif
 
+#ifdef LINUX95_QEMU_DNS_SELF_TEST
+    (void)net::dns::begin_lookup("example.com");
+#endif
+
     if (framebuffer_result ==
         graphics::FramebufferInitResult::Unavailable) {
         debug::write("[INFO] graphics_fallback_vga\n");

@@ -108,6 +108,8 @@ NETWORK_TEST_OBJS := $(subst $(BUILD)/kernel.o,$(BUILD)/kernel-network-test.o,$(
 NETWORK_TEST_IMAGE := $(BUILD)/linux95-kernel-network-test.img
 UDP_NETWORK_TEST_OBJS := $(subst $(BUILD)/kernel.o,$(BUILD)/kernel-udp-network-test.o,$(KERNEL_OBJS))
 UDP_NETWORK_TEST_IMAGE := $(BUILD)/linux95-udp-network-test.img
+DNS_NETWORK_TEST_OBJS := $(subst $(BUILD)/dns.o,$(BUILD)/dns-dns-network-test.o,$(subst $(BUILD)/network.o,$(BUILD)/network-dns-network-test.o,$(subst $(BUILD)/kernel.o,$(BUILD)/kernel-dns-network-test.o,$(KERNEL_OBJS))))
+DNS_NETWORK_TEST_IMAGE := $(BUILD)/linux95-dns-network-test.img
 
 .PHONY: all clean run run-debug test test-qemu prepare-storage-test-image test-host-segments test-host-process test-host-scheduler test-host-user-space test-host-elf test-host-elf-loader-plan test-host-syscall test-host-memory test-host-storage test-host-filesystem test-host-graphics test-host-pci test-host-rtl8139-helpers test-host-kernel-virtual-to-physical test-host-ethernet test-host-arp test-host-ipv4 test-host-icmp test-host-udp test-host-udp-bindings test-host-network-udp test-host-dns-message test-host-dns-response test-host-dns-resolver test-host-heap test-memory-source test-storage-source test-relocations check-tools
 
@@ -234,6 +236,17 @@ $(BUILD)/kernel-udp-network-test.o: \
 	kernel/filesystem/vfs_self_test.hpp | $(BUILD)
 >$(CXX) $(CXXFLAGS) -DLINUX95_QEMU_NETWORK_SELF_TEST -DLINUX95_QEMU_UDP_NETWORK_SELF_TEST -c $< -o $@
 
+$(BUILD)/kernel-dns-network-test.o: \
+	kernel/kernel.cpp \
+	kernel/boot_info.hpp \
+	kernel/arch/x86_64/segments.hpp \
+	kernel/arch/x86_64/tss.hpp \
+	kernel/filesystem/vfs.hpp \
+	kernel/net/network.hpp \
+	kernel/net/dns.hpp \
+	kernel/filesystem/vfs_self_test.hpp | $(BUILD)
+>$(CXX) $(CXXFLAGS) -DLINUX95_QEMU_NETWORK_SELF_TEST -DLINUX95_QEMU_DNS_SELF_TEST -c $< -o $@
+
 $(BUILD)/renderer.o: kernel/graphics/renderer.cpp kernel/graphics/renderer.hpp kernel/graphics/font8x8.hpp kernel/graphics/framebuffer.hpp | $(BUILD)
 >$(CXX) $(CXXFLAGS) -c $< -o $@
 
@@ -312,8 +325,14 @@ $(BUILD)/udp_bindings.o: kernel/net/udp_bindings.cpp kernel/net/udp_bindings.hpp
 $(BUILD)/network.o: kernel/net/network.cpp kernel/net/network.hpp kernel/net/arp.hpp kernel/net/ethernet.hpp kernel/net/icmp.hpp kernel/net/ipv4.hpp kernel/net/udp.hpp kernel/net/udp_bindings.hpp kernel/drivers/rtl8139.hpp kernel/arch/debug.hpp kernel/arch/pit.hpp | $(BUILD)
 >$(CXX) $(CXXFLAGS) -c $< -o $@
 
+$(BUILD)/network-dns-network-test.o: kernel/net/network.cpp kernel/net/network.hpp kernel/net/arp.hpp kernel/net/ethernet.hpp kernel/net/icmp.hpp kernel/net/ipv4.hpp kernel/net/udp.hpp kernel/net/udp_bindings.hpp kernel/drivers/rtl8139.hpp kernel/arch/debug.hpp kernel/arch/pit.hpp | $(BUILD)
+>$(CXX) $(CXXFLAGS) -DLINUX95_QEMU_DNS_SELF_TEST -c $< -o $@
+
 $(BUILD)/dns.o: kernel/net/dns.cpp kernel/net/dns.hpp kernel/net/network.hpp kernel/arch/pit.hpp | $(BUILD)
 >$(CXX) $(CXXFLAGS) -minline-all-stringops -c $< -o $@
+
+$(BUILD)/dns-dns-network-test.o: kernel/net/dns.cpp kernel/net/dns.hpp kernel/net/network.hpp kernel/arch/pit.hpp kernel/arch/debug.hpp | $(BUILD)
+>$(CXX) $(CXXFLAGS) -minline-all-stringops -DLINUX95_QEMU_DNS_SELF_TEST -c $< -o $@
 
 
 $(BUILD)/memory.o: kernel/memory/memory.cpp kernel/memory/memory.hpp kernel/memory/address.hpp kernel/boot_info.hpp | $(BUILD)
@@ -618,6 +637,17 @@ $(BUILD)/kernel-udp-network-test.bin: $(BUILD)/kernel-udp-network-test.elf
 	max=$$(( $(KERNEL_SECTORS) * $(SECTOR) )); \
 	test $$size -le $$max || { echo "ERROR: UDP-test kernel too large: $$size > $$max"; exit 1; }
 
+$(BUILD)/kernel-dns-network-test.elf: $(DNS_NETWORK_TEST_OBJS) linker.ld
+>$(LD) -nostdlib -z max-page-size=0x1000 -T linker.ld -o $@ $(DNS_NETWORK_TEST_OBJS)
+>@entry=$$($(READELF) -h $@ | awk '/Entry point address:/ {print $$4}'); \
+	test "$$entry" = "0x100000" || { echo "ERROR: bad DNS-test kernel entry: $$entry"; exit 1; }
+
+$(BUILD)/kernel-dns-network-test.bin: $(BUILD)/kernel-dns-network-test.elf
+>$(OBJCOPY) -O binary $< $@
+>@size=$$(stat -c%s $@); \
+	max=$$(( $(KERNEL_SECTORS) * $(SECTOR) )); \
+	test $$size -le $$max || { echo "ERROR: DNS-test kernel too large: $$size > $$max"; exit 1; }
+
 $(BUILD)/linux95-kernel.img: \
 	$(BUILD)/stage1.bin \
 	$(BUILD)/stage2.bin \
@@ -647,6 +677,15 @@ $(UDP_NETWORK_TEST_IMAGE): \
 >dd if=$(BUILD)/stage1.bin of=$@ bs=$(SECTOR) seek=0 conv=notrunc status=none
 >dd if=$(BUILD)/stage2.bin of=$@ bs=$(SECTOR) seek=1 conv=notrunc status=none
 >dd if=$(BUILD)/kernel-udp-network-test.bin of=$@ bs=$(SECTOR) seek=$(KERNEL_LBA) conv=notrunc status=none
+
+$(DNS_NETWORK_TEST_IMAGE): \
+	$(BUILD)/stage1.bin \
+	$(BUILD)/stage2.bin \
+	$(BUILD)/kernel-dns-network-test.bin
+>dd if=/dev/zero of=$@ bs=$(SECTOR) count=$(IMAGE_SECTORS) status=none
+>dd if=$(BUILD)/stage1.bin of=$@ bs=$(SECTOR) seek=0 conv=notrunc status=none
+>dd if=$(BUILD)/stage2.bin of=$@ bs=$(SECTOR) seek=1 conv=notrunc status=none
+>dd if=$(BUILD)/kernel-dns-network-test.bin of=$@ bs=$(SECTOR) seek=$(KERNEL_LBA) conv=notrunc status=none
 
 $(STORAGE_TEST_IMAGE): tests/prepare_fat32_image.py $(BUILD)/user/init.elf $(BUILD)/user/worker.elf | $(BUILD)
 >@for tool in mkfs.fat mmd mcopy; do \
@@ -688,10 +727,11 @@ test: all test-host-memory test-host-storage test-host-heap test-host-segments t
 >$(PYTHON) tests/filesystem_source_checks.py
 >$(PYTHON) tests/relocation_checks.py
 
-test-qemu: all $(NETWORK_TEST_IMAGE) $(UDP_NETWORK_TEST_IMAGE) prepare-storage-test-image
+test-qemu: all $(NETWORK_TEST_IMAGE) $(UDP_NETWORK_TEST_IMAGE) $(DNS_NETWORK_TEST_IMAGE) prepare-storage-test-image
 >@command -v $(QEMU) >/dev/null || { echo "Missing tool: $(QEMU)"; exit 1; }
 >$(PYTHON) tests/qemu_smoke.py
 >$(PYTHON) tests/qemu_smoke.py --udp-network-test
+>$(PYTHON) tests/qemu_smoke.py --dns-network-test
 >$(PYTHON) tests/qemu_smoke.py --without-network
 >$(PYTHON) tests/qemu_smoke.py --process-preemption-test
 

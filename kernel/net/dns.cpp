@@ -2,6 +2,9 @@
 
 #include "arch/pit.hpp"
 #include "net/network.hpp"
+#ifdef LINUX95_QEMU_DNS_SELF_TEST
+#include "arch/debug.hpp"
+#endif
 
 namespace linux95::net::dns {
 
@@ -29,6 +32,9 @@ struct Resolver {
 };
 
 Resolver g_resolver{};
+#ifdef LINUX95_QEMU_DNS_SELF_TEST
+bool g_dns_query_reported = false;
+#endif
 
 bool addresses_equal(const net::Ipv4Address& left,
                      const net::Ipv4Address& right)
@@ -69,6 +75,12 @@ void send_attempt()
     ++g_resolver.attempts;
     g_resolver.sent_at = pit::ticks();
     g_resolver.awaiting = true;
+#ifdef LINUX95_QEMU_DNS_SELF_TEST
+    if (!g_dns_query_reported) {
+        debug::write("[PASS] dns_query_accepted\n");
+        g_dns_query_reported = true;
+    }
+#endif
 }
 
 void on_udp(const net::Ipv4Address& source, uint16_t source_port,
@@ -105,6 +117,11 @@ void on_udp(const net::Ipv4Address& source, uint16_t source_port,
     for (size_t i = 0; i < g_resolver.address_count; ++i) {
         g_resolver.addresses[i] = parsed.addresses[i];
     }
+#ifdef LINUX95_QEMU_DNS_SELF_TEST
+    if (g_resolver.status == Status::Success && g_resolver.address_count > 0) {
+        debug::write("[PASS] dns_lookup\n");
+    }
+#endif
 }
 
 bool ascii_alnum(uint8_t value)

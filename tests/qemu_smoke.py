@@ -16,19 +16,22 @@ PROCESS_FAULT_TEST = "--process-fault-test" in sys.argv[1:]
 PROCESS_PREEMPTION_TEST = "--process-preemption-test" in sys.argv[1:]
 WITHOUT_USER_PROGRAMS = "--without-user-programs" in sys.argv[1:]
 UDP_NETWORK_TEST = "--udp-network-test" in sys.argv[1:]
+DNS_NETWORK_TEST = "--dns-network-test" in sys.argv[1:]
 UDP_PAYLOAD = b"linux95-udp-echo"
 UDP_INVALID_REPLY = b"linux95-udp-evil"
 
 if sum((WITHOUT_NETWORK, PROCESS_SELF_TEST, PROCESS_FAULT_TEST,
         PROCESS_PREEMPTION_TEST, WITHOUT_USER_PROGRAMS,
-        UDP_NETWORK_TEST)) > 1 or any(
+        UDP_NETWORK_TEST, DNS_NETWORK_TEST)) > 1 or any(
         argument not in ("--without-network", "--process-self-test",
                          "--process-fault-test", "--process-preemption-test",
-                         "--without-user-programs", "--udp-network-test")
+                         "--without-user-programs", "--udp-network-test",
+                         "--dns-network-test")
        for argument in sys.argv[1:]):
     print("usage: qemu_smoke.py [--without-network] [--process-self-test] "
           "[--process-fault-test] [--process-preemption-test] "
-          "[--without-user-programs] [--udp-network-test]")
+          "[--without-user-programs] [--udp-network-test] "
+          "[--dns-network-test]")
     sys.exit(2)
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -38,6 +41,7 @@ IMAGE = ROOT / "build" / (
             PROCESS_PREEMPTION_TEST or WITHOUT_USER_PROGRAMS
     else "linux95-udp-network-test.img"
     if UDP_NETWORK_TEST
+    else "linux95-dns-network-test.img" if DNS_NETWORK_TEST
     else "linux95-kernel-network-test.img"
 )
 STORAGE_IMAGE = ROOT / "build" / (
@@ -167,7 +171,7 @@ proc = subprocess.Popen(
     text=True,
 )
 
-deadline = time.monotonic() + 12.0
+deadline = time.monotonic() + (25.0 if DNS_NETWORK_TEST else 12.0)
 saw_completion = False
 completion_seen_at = None
 early_exit = None
@@ -176,6 +180,8 @@ completion_marker = (
     if PROCESS_PREEMPTION_TEST
     else "[PASS] udp_rx"
     if UDP_NETWORK_TEST
+    else "[PASS] dns_lookup"
+    if DNS_NETWORK_TEST
     else "[PASS] desktop remained online"
     if PROCESS_SELF_TEST or PROCESS_FAULT_TEST
     else ("[PASS] desktop_online"
@@ -192,9 +198,16 @@ try:
 
         if LOG.exists():
             content = LOG.read_text(errors="replace")
+            dns_evidence = all(marker in content for marker in (
+                "[PASS] dns_query_accepted",
+                "[PASS] dns_arp_next_hop_resolved 10.0.2.3",
+                "[PASS] dns_lookup",
+                "[PASS] icmp_echo_reply",
+            ))
             if completion_marker in content and (
                     not UDP_NETWORK_TEST or
-                    "[PASS] icmp_echo_reply" in content):
+                    "[PASS] icmp_echo_reply" in content) and (
+                    not DNS_NETWORK_TEST or dns_evidence):
                 if UDP_NETWORK_TEST:
                     if completion_seen_at is None:
                         completion_seen_at = time.monotonic()
@@ -244,6 +257,13 @@ if early_exit is not None and not saw_completion:
 if not saw_completion:
     print("qemu smoke test: FAIL")
     print("completion observation did not finish before deadline")
+    if DNS_NETWORK_TEST:
+        missing_dns = [marker for marker in (
+            "[PASS] dns_query_accepted",
+            "[PASS] dns_arp_next_hop_resolved 10.0.2.3",
+            "[PASS] dns_lookup",
+        ) if marker not in content]
+        print("missing DNS markers:", ", ".join(missing_dns) or "(none)")
     print("--- debug log ---")
     print(content or "(empty)")
     sys.exit(1)
@@ -340,6 +360,11 @@ if UDP_NETWORK_TEST:
     required.extend(["[PASS] udp_ready", "[PASS] udp_tx",
                      "[PASS] udp_echo_validated", "[PASS] udp_rx"])
 
+if DNS_NETWORK_TEST:
+    required.extend(["[PASS] udp_ready", "[PASS] dns_query_accepted",
+                     "[PASS] dns_arp_next_hop_resolved 10.0.2.3",
+                     "[PASS] dns_lookup"])
+
 if PROCESS_SELF_TEST:
     required.extend([
         "[PASS] entered ring3",
@@ -423,6 +448,32 @@ if UDP_NETWORK_TEST:
             print("udp_rx was not one-shot:", content.count("[PASS] udp_rx"))
         if not bad_order and not bad_counts:
             print("UDP completion markers were malformed")
+        print("--- debug log ---")
+        print(content or "(empty)")
+        sys.exit(1)
+
+if DNS_NETWORK_TEST:
+    ordered_markers = [
+        "[PASS] rtl8139_detected",
+        "[PASS] arp_ready",
+        "[PASS] udp_ready",
+        "[PASS] dns_query_accepted",
+        "[PASS] dns_arp_next_hop_resolved 10.0.2.3",
+        "[PASS] dns_lookup",
+    ]
+    positions = [content.find(marker) for marker in ordered_markers]
+    if positions != sorted(positions) or any(
+            content.count(marker) != 1 for marker in ordered_markers):
+        print("qemu smoke test: FAIL")
+        print("DNS path markers were missing, repeated, or out of order")
+        print("--- debug log ---")
+        print(content or "(empty)")
+        sys.exit(1)
+    if (content.count("[BOOT] low_kernel_entry") != 1 or
+            "#DF" in content or "double fault" in content.lower() or
+            "triple fault" in content.lower() or "reset" in content.lower()):
+        print("qemu smoke test: FAIL")
+        print("DNS test encountered a reset or fatal fault")
         print("--- debug log ---")
         print(content or "(empty)")
         sys.exit(1)
@@ -591,4 +642,6 @@ else:
     print("[PASS] ICMP echo reply received from 10.0.2.2")
     if UDP_NETWORK_TEST:
         print("[PASS] UDP echo received through RTL8139")
+    if DNS_NETWORK_TEST:
+        print("[PASS] DNS A lookup completed through RTL8139")
 print("QEMU smoke test: PASS")
