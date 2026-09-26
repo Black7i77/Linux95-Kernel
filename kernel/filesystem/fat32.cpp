@@ -8,6 +8,7 @@ namespace linux95::filesystem::fat32 {
 namespace {
 
 bool mounted = false;
+helpers::BpbGeometry mounted_bpb = {};
 uint32_t fat_begin_lba = 0;
 uint32_t first_data_lba = 0;
 uint32_t cluster_count = 0;
@@ -25,6 +26,7 @@ bool valid_data_cluster(uint32_t cluster)
 bool mount(VolumeInfo& volume)
 {
     mounted = false;
+    mounted_bpb = {};
 
     volume.mounted = false;
     volume.bytes_per_sector = 0;
@@ -78,8 +80,19 @@ bool mount(VolumeInfo& volume)
     cluster_count = geometry.cluster_count;
     root_cluster = geometry.root_cluster;
     sectors_per_cluster = geometry.sectors_per_cluster;
+    mounted_bpb = geometry;
     mounted = true;
 
+    return true;
+}
+
+bool mounted_geometry(helpers::BpbGeometry& geometry)
+{
+    if (!mounted) {
+        return false;
+    }
+
+    geometry = mounted_bpb;
     return true;
 }
 
@@ -98,6 +111,23 @@ Status next_cluster(
             fat_begin_lba,
             fat_sector_lba,
             inside)) {
+        return Status::Corrupt;
+    }
+
+    if (!valid_data_cluster(cluster)) {
+        return Status::Corrupt;
+    }
+
+    uint32_t fat_offset = 0;
+    if (!helpers::checked_mul_u32(
+            mounted_bpb.active_fat,
+            mounted_bpb.sectors_per_fat,
+            fat_offset) ||
+        !helpers::checked_add_u32(
+            fat_sector_lba,
+            fat_offset,
+            fat_sector_lba) ||
+        fat_sector_lba >= first_data_lba) {
         return Status::Corrupt;
     }
 

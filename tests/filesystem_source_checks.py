@@ -16,10 +16,16 @@ for path in sorted(FS.glob("*")):
         text = path.read_text()
         filesystem_sources += "\n" + text
 
-        if "storage::write_sector" in text:
+        if "storage::write_sector" in text and path.name != "fat32_write.cpp":
             raise SystemExit(
                 f"FAIL: filesystem write call found in {path}"
             )
+
+writer = (FS / "fat32_write.cpp").read_text()
+if "storage::write_sector(storage::DiskId::Test," not in writer:
+    raise SystemExit("FAIL: FAT32 writer does not target Test disk")
+if re.search(r"storage::write_sector\s*\(\s*storage::DiskId::Boot", writer):
+    raise SystemExit("FAIL: FAT32 writer targets Boot disk")
 
 if "storage::read_sector" not in fat32:
     raise SystemExit(

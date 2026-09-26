@@ -263,6 +263,8 @@ struct BpbGeometry {
     uint32_t fat_begin_lba;
     uint32_t first_data_lba;
     uint32_t cluster_count;
+    bool mirroring_enabled;
+    uint8_t active_fat;
 };
 
 inline bool parse_bpb(
@@ -289,6 +291,10 @@ inline bool parse_bpb(
 
     const uint32_t total_sectors_32 = le32(sector + 32);
     const uint32_t sectors_per_fat = le32(sector + 36);
+    const uint16_t extended_flags = le16(sector + 40);
+    const bool mirroring_enabled = (extended_flags & 0x0080u) == 0;
+    const uint8_t active_fat = mirroring_enabled
+        ? 0 : static_cast<uint8_t>(extended_flags & 0x000fu);
 
     const uint16_t filesystem_version = le16(sector + 42);
     const uint32_t root_cluster = le32(sector + 44);
@@ -303,6 +309,10 @@ inline bool parse_bpb(
     }
 
     if (reserved_sectors == 0 || fat_count == 0) {
+        return false;
+    }
+
+    if (!mirroring_enabled && active_fat >= fat_count) {
         return false;
     }
 
@@ -390,6 +400,11 @@ inline bool parse_bpb(
         return false;
     }
 
+    // FAT32 reserves entry values 0x0FFFFFF0 and above.
+    if (max_cluster >= 0x0FFFFFF0u) {
+        return false;
+    }
+
     if (root_cluster > max_cluster) {
         return false;
     }
@@ -405,6 +420,8 @@ inline bool parse_bpb(
         static_cast<uint32_t>(reserved_sectors);
     out.first_data_lba = first_data_lba;
     out.cluster_count = cluster_count;
+    out.mirroring_enabled = mirroring_enabled;
+    out.active_fat = active_fat;
 
     return true;
 }

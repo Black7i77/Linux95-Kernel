@@ -1,10 +1,12 @@
 #pragma once
 
 #include "filesystem/filesystem.hpp"
+#include "filesystem/fat32_helpers.hpp"
 
 namespace linux95::filesystem::fat32 {
 
 bool mount(VolumeInfo& volume);
+bool mounted_geometry(helpers::BpbGeometry& geometry);
 
 Status list_directory(
     const char* path,

@@ -19,6 +19,11 @@ enum class Status : uint8_t {
     InvalidHandle,
     TooManyOpenFiles,
     TooManyOpenDirectories,
+    AlreadyExists,
+    InvalidName,
+    NoSpace,
+    DirectoryNotEmpty,
+    ReadOnly,
 };
 
 struct Entry {

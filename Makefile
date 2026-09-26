@@ -98,6 +98,7 @@ KERNEL_OBJS := \
 	$(BUILD)/disk.o \
 	$(BUILD)/storage_self_test.o \
 	$(BUILD)/fat32.o \
+	$(BUILD)/fat32_write.o \
 	$(BUILD)/filesystem.o \
 	$(BUILD)/vfs.o \
 	$(BUILD)/filesystem_self_test.o \
@@ -523,6 +524,9 @@ $(BUILD)/host-fat32-mount-test: \
 	kernel/storage/disk.hpp | $(BUILD)
 >$(CXX) $(HOST_CXXFLAGS) tests/host/fat32_mount_test.cpp kernel/filesystem/fat32.cpp kernel/filesystem/filesystem.cpp -o $@
 
+$(BUILD)/host-fat32-write-test: tests/host/fat32_write_test.cpp kernel/filesystem/fat32_write.cpp kernel/filesystem/fat32_write.hpp kernel/filesystem/fat32.cpp kernel/filesystem/fat32.hpp kernel/filesystem/fat32_helpers.hpp kernel/filesystem/filesystem.hpp kernel/storage/disk.hpp | $(BUILD)
+>$(CXX) $(HOST_CXXFLAGS) tests/host/fat32_write_test.cpp kernel/filesystem/fat32_write.cpp kernel/filesystem/fat32.cpp -o $@
+
 $(BUILD)/host-vfs-test: \
 	tests/host/vfs_test.cpp \
 	kernel/filesystem/vfs.cpp \
@@ -536,10 +540,11 @@ $(BUILD)/host-framebuffer-helpers-test: tests/host/framebuffer_helpers_test.cpp 
 test-host-graphics: $(BUILD)/host-framebuffer-helpers-test
 >$(BUILD)/host-framebuffer-helpers-test
 
-test-host-filesystem: $(BUILD)/host-fat32-helpers-test $(BUILD)/host-fat32-mount-test $(BUILD)/host-vfs-test
+test-host-filesystem: $(BUILD)/host-fat32-helpers-test $(BUILD)/host-fat32-mount-test $(BUILD)/host-vfs-test $(BUILD)/host-fat32-write-test
 >$(BUILD)/host-fat32-helpers-test
 >$(BUILD)/host-fat32-mount-test
 >$(BUILD)/host-vfs-test
+>$(BUILD)/host-fat32-write-test
 
 $(BUILD)/heap.o: kernel/memory/heap.cpp kernel/memory/heap.hpp | $(BUILD)
 >$(CXX) $(CXXFLAGS) -c $< -o $@
@@ -551,6 +556,9 @@ $(BUILD)/disk.o: kernel/storage/disk.cpp kernel/storage/disk.hpp kernel/storage/
 >$(CXX) $(CXXFLAGS) -c $< -o $@
 
 $(BUILD)/fat32.o: kernel/filesystem/fat32.cpp kernel/filesystem/fat32.hpp kernel/filesystem/fat32_helpers.hpp kernel/filesystem/filesystem.hpp kernel/storage/disk.hpp | $(BUILD)
+>$(CXX) $(CXXFLAGS) -c $< -o $@
+
+$(BUILD)/fat32_write.o: kernel/filesystem/fat32_write.cpp kernel/filesystem/fat32_write.hpp kernel/filesystem/fat32.hpp kernel/filesystem/fat32_helpers.hpp kernel/filesystem/filesystem.hpp kernel/storage/disk.hpp | $(BUILD)
 >$(CXX) $(CXXFLAGS) -c $< -o $@
 
 $(BUILD)/filesystem.o: kernel/filesystem/filesystem.cpp kernel/filesystem/filesystem.hpp kernel/filesystem/fat32.hpp | $(BUILD)
