@@ -670,10 +670,15 @@ void test_dnsserver_display_update_invalid_busy_and_offline()
     assert(dns.server.bytes[0] == 1 && dns.server.bytes[3] == 4);
 
     const char* invalid[] = {"dnsserver 256.2.3.4", "dnsserver 1.2.3", "dnsserver 1.2.3.4 extra"};
+    bool invalid_shows_configured_server = true;
     for (const char* command : invalid) {
         reset_output(fake);
         enter_command(session, command);
-        assert(strstr(fake.text, "usage: dnsserver [IPv4 address]\nlinux95> ") != nullptr);
+        invalid_shows_configured_server =
+            strstr(fake.text,
+            "usage: dnsserver [IPv4 address]\n"
+            "dns server: 1.2.3.4\nlinux95> ") != nullptr &&
+            invalid_shows_configured_server;
         assert(dns.set_calls == 1);
         assert(dns.server.bytes[0] == 1 && dns.server.bytes[3] == 4);
     }
@@ -681,7 +686,11 @@ void test_dnsserver_display_update_invalid_busy_and_offline()
     dns.set_result = linux95::net::dns::Status::Busy;
     reset_output(fake);
     enter_command(session, "dnsserver 8.8.8.8");
-    assert(strcmp(fake.text, "dnsserver 8.8.8.8\ndnsserver: lookup in progress\nlinux95> ") == 0);
+    assert(strcmp(fake.text,
+        "dnsserver 8.8.8.8\n"
+        "dnsserver: lookup in progress\n"
+        "dns server: 1.2.3.4\nlinux95> ") == 0);
+    assert(invalid_shows_configured_server);
     assert(dns.set_calls == 2);
     assert(dns.server.bytes[0] == 1 && dns.server.bytes[3] == 4);
 

@@ -225,17 +225,14 @@ bool ShellSession::execute_dns_command()
             net::Ipv4Address address{};
             if (!parse_ipv4(argument, address)) {
                 write(output_, "usage: dnsserver [IPv4 address]\n");
-                return true;
-            }
-            if (dns_callbacks_->set_server == nullptr) {
+            } else if (dns_callbacks_->set_server == nullptr) {
                 write(output_, "dnsserver: unavailable\n");
-                return true;
-            }
-            const net::dns::Status status = dns_callbacks_->set_server(
-                dns_callbacks_->context, address);
-            if (status == net::dns::Status::Busy) {
-                write(output_, "dnsserver: lookup in progress\n");
-                return true;
+            } else {
+                const net::dns::Status status = dns_callbacks_->set_server(
+                    dns_callbacks_->context, address);
+                if (status == net::dns::Status::Busy) {
+                    write(output_, "dnsserver: lookup in progress\n");
+                }
             }
         }
         write(output_, "dns server: ");
