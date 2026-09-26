@@ -251,6 +251,33 @@ inline bool valid_path_component(
     return true;
 }
 
+inline bool encode_short_name(const char* text, size_t length, uint8_t out[11])
+{
+    if (out == nullptr || !valid_path_component(text, length)) return false;
+    constexpr char allowed[] = "$%'-_@~`!(){}^#&";
+    for (size_t i = 0; i < length; ++i) {
+        const char c = text[i];
+        if (c == '.') continue;
+        const bool alphanumeric = (c >= 'A' && c <= 'Z') ||
+                                  (c >= 'a' && c <= 'z') ||
+                                  (c >= '0' && c <= '9');
+        bool punctuation = false;
+        for (size_t j = 0; j < sizeof allowed - 1; ++j)
+            if (c == allowed[j]) punctuation = true;
+        if (!alphanumeric && !punctuation) return false;
+    }
+    for (size_t i = 0; i < 11; ++i) out[i] = ' ';
+    size_t position = 0;
+    for (size_t i = 0; i < length; ++i) {
+        if (text[i] == '.') {
+            position = 8;
+            continue;
+        }
+        out[position++] = static_cast<uint8_t>(ascii_upper(text[i]));
+    }
+    return true;
+}
+
 
 struct BpbGeometry {
     uint16_t bytes_per_sector;

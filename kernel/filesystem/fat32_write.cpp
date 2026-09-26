@@ -2,6 +2,7 @@
 
 #include "filesystem/fat32.hpp"
 #include "filesystem/fat32_helpers.hpp"
+#include "filesystem/vfs.hpp"
 #include "storage/disk.hpp"
 
 namespace linux95::filesystem::fat32::write {
@@ -83,7 +84,305 @@ Status chain_next(const helpers::BpbGeometry& g, uint32_t cluster,
     end = false; next = value; return Status::Ok;
 }
 
+bool directory_lba(const helpers::BpbGeometry& g, uint32_t cluster,
+                   uint32_t sector_index, uint32_t& lba)
+{
+    uint32_t first = 0;
+    return valid_cluster(g, cluster) && sector_index < g.sectors_per_cluster &&
+        helpers::cluster_to_lba(g.first_data_lba, g.sectors_per_cluster,
+                                cluster, first) &&
+        helpers::checked_add_u32(first, sector_index, lba) &&
+        lba < g.total_sectors;
+}
+
+bool valid_slot(const helpers::BpbGeometry& g, const DirectorySlot& slot)
+{
+    return slot.lba >= g.first_data_lba && slot.lba < g.total_sectors &&
+        slot.offset < 512 && slot.offset % 32 == 0;
+}
+
+bool live_short_entry(const uint8_t* entry)
+{
+    return entry[0] != 0 && entry[0] != 0xe5 &&
+        entry[11] != 0x0f && (entry[11] & 0x08) == 0;
+}
+
+Status find_in_directory(const helpers::BpbGeometry& g, uint32_t first_cluster,
+                         const uint8_t name[11], DirectorySlot& found_slot,
+                         uint8_t found_entry[32], DirectorySlot* free_slot,
+                         uint32_t* tail)
+{
+    if (!valid_cluster(g, first_cluster)) return Status::Corrupt;
+    bool have_free = false;
+    uint32_t cluster = first_cluster;
+    for (uint32_t walked = 0; walked < g.cluster_count; ++walked) {
+        for (uint32_t sector_index = 0; sector_index < g.sectors_per_cluster;
+             ++sector_index) {
+            uint32_t lba = 0;
+            if (!directory_lba(g, cluster, sector_index, lba)) return Status::Corrupt;
+            uint8_t sector[512];
+            if (!storage::read_sector(storage::DiskId::Test, lba, sector))
+                return Status::IoError;
+            for (uint16_t offset = 0; offset < 512; offset += 32) {
+                const uint8_t* entry = sector + offset;
+                if ((entry[0] == 0 || entry[0] == 0xe5) && !have_free) {
+                    if (free_slot != nullptr) *free_slot = {lba, offset};
+                    have_free = true;
+                }
+                if (entry[0] == 0) {
+                    if (tail != nullptr) *tail = cluster;
+                    return Status::NotFound;
+                }
+                if (live_short_entry(entry)) {
+                    bool equal = true;
+                    for (uint32_t i = 0; i < 11; ++i)
+                        if (static_cast<uint8_t>(helpers::ascii_upper(
+                                static_cast<char>(entry[i]))) != name[i]) equal = false;
+                    if (equal) {
+                        found_slot = {lba, offset};
+                        for (uint32_t i = 0; i < 32; ++i) found_entry[i] = entry[i];
+                        return Status::Ok;
+                    }
+                }
+            }
+        }
+        uint32_t next = 0;
+        bool end = false;
+        const Status step = chain_next(g, cluster, next, end);
+        if (step != Status::Ok) return step;
+        if (end) {
+            if (tail != nullptr) *tail = cluster;
+            return Status::NotFound;
+        }
+        cluster = next;
+    }
+    return Status::Corrupt;
+}
+
+bool encode_component(const char* name, uint8_t encoded[11])
+{
+    if (name == nullptr) return false;
+    size_t length = 0;
+    while (length < 13 && name[length] != 0) ++length;
+    return length < 13 && helpers::encode_short_name(name, length, encoded);
+}
+
+Status put_directory_entry(const helpers::BpbGeometry& g,
+                           const DirectorySlot& slot, const uint8_t entry[32],
+                           bool* unchanged)
+{
+    if (unchanged != nullptr) *unchanged = false;
+    if (!valid_slot(g, slot) || entry == nullptr) return Status::Corrupt;
+    uint8_t sector[512];
+    if (!storage::read_sector(storage::DiskId::Test, slot.lba, sector))
+        return Status::IoError;
+    uint8_t previous[32];
+    for (uint32_t i = 0; i < 32; ++i) {
+        previous[i] = sector[slot.offset + i];
+        sector[slot.offset + i] = entry[i];
+    }
+    if (storage::write_sector(storage::DiskId::Test, slot.lba, sector)) return Status::Ok;
+    if (unchanged != nullptr) {
+        uint8_t observed[512];
+        if (storage::read_sector(storage::DiskId::Test, slot.lba, observed)) {
+            *unchanged = true;
+            for (uint32_t i = 0; i < 32; ++i)
+                if (observed[slot.offset + i] != previous[i]) *unchanged = false;
+        }
+    }
+    return Status::IoError;
+}
+
+void reclaim_if_unlinked(const helpers::BpbGeometry& g, uint32_t tail,
+                         uint32_t fresh)
+{
+    for (uint32_t copy = 0; copy < g.fat_count; ++copy) {
+        uint32_t raw = 0;
+        if (read_entry(g, tail, copy, raw) != Status::Ok ||
+            !helpers::is_eoc(raw)) return;
+    }
+    (void)free_chain(fresh);
+}
+
 } // namespace
+
+Status resolve_path(const char* path, ResolvedPath& result)
+{
+    result = {};
+    if (path == nullptr) return Status::InvalidName;
+    size_t length = 0;
+    while (length < vfs::kPathCapacity && path[length] != 0) ++length;
+    if (length == 0 || length == vfs::kPathCapacity) return Status::InvalidName;
+    size_t begin = path[0] == '/' ? 1 : 0;
+    if (begin == length) return Status::InvalidName;
+    // Validate the complete path before any I/O or dependent mutation.
+    for (size_t start = begin; start < length;) {
+        size_t end = start;
+        while (end < length && path[end] != '/') ++end;
+        uint8_t ignored[11];
+        if (!helpers::encode_short_name(path + start, end - start, ignored))
+            return Status::InvalidName;
+        start = end + 1;
+        if (end + 1 == length) return Status::InvalidName;
+    }
+    helpers::BpbGeometry g = {};
+    const Status ready = geometry_for_write(g);
+    if (ready != Status::Ok) return ready;
+    uint32_t parent = g.root_cluster;
+    for (size_t start = begin; start < length;) {
+        size_t end = start;
+        while (end < length && path[end] != '/') ++end;
+        uint8_t encoded[11];
+        (void)helpers::encode_short_name(path + start, end - start, encoded);
+        DirectorySlot slot = {};
+        uint8_t entry[32] = {};
+        const Status found = find_in_directory(g, parent, encoded, slot, entry,
+                                                nullptr, nullptr);
+        if (end == length) {
+            if (found != Status::Ok && found != Status::NotFound) return found;
+            result.parent_cluster = parent;
+            for (uint32_t i = 0; i < 11; ++i) result.name[i] = encoded[i];
+            result.exists = found == Status::Ok;
+            if (result.exists) {
+                result.slot = slot;
+                for (uint32_t i = 0; i < 32; ++i) result.entry[i] = entry[i];
+            }
+            return Status::Ok;
+        }
+        if (found != Status::Ok) return found;
+        if ((entry[11] & 0x10) == 0) return Status::NotDirectory;
+        const uint32_t child = (static_cast<uint32_t>(helpers::le16(entry + 20)) << 16) |
+                               helpers::le16(entry + 26);
+        if (!valid_cluster(g, child)) return Status::Corrupt;
+        parent = child;
+        start = end + 1;
+    }
+    return Status::InvalidName;
+}
+
+Status find_directory_entry(uint32_t directory_cluster, const char* name,
+                            DirectorySlot& slot, uint8_t entry[32])
+{
+    uint8_t encoded[11];
+    if (entry == nullptr || !encode_component(name, encoded)) return Status::InvalidName;
+    helpers::BpbGeometry g = {};
+    const Status ready = geometry_for_write(g);
+    if (ready != Status::Ok) return ready;
+    return find_in_directory(g, directory_cluster, encoded, slot, entry,
+                             nullptr, nullptr);
+}
+
+Status read_directory_entry(const DirectorySlot& slot, uint8_t entry[32])
+{
+    if (entry == nullptr) return Status::InvalidName;
+    helpers::BpbGeometry g = {};
+    const Status ready = geometry_for_write(g);
+    if (ready != Status::Ok) return ready;
+    if (!valid_slot(g, slot)) return Status::Corrupt;
+    uint8_t sector[512];
+    if (!storage::read_sector(storage::DiskId::Test, slot.lba, sector))
+        return Status::IoError;
+    for (uint32_t i = 0; i < 32; ++i) entry[i] = sector[slot.offset + i];
+    return Status::Ok;
+}
+
+Status update_directory_entry(const DirectorySlot& slot, const uint8_t name[11],
+                              uint32_t first_cluster, uint32_t size)
+{
+    if (name == nullptr) return Status::InvalidName;
+    helpers::BpbGeometry g = {};
+    const Status ready = geometry_for_write(g);
+    if (ready != Status::Ok) return ready;
+    if (first_cluster != 0 && !valid_cluster(g, first_cluster)) return Status::Corrupt;
+    uint8_t entry[32];
+    const Status read = read_directory_entry(slot, entry);
+    if (read != Status::Ok) return read;
+    if (!live_short_entry(entry)) return Status::NotFound;
+    for (uint32_t i = 0; i < 11; ++i) entry[i] = name[i];
+    entry[20] = static_cast<uint8_t>(first_cluster >> 16);
+    entry[21] = static_cast<uint8_t>((entry[21] & 0xf0u) |
+                                     ((first_cluster >> 24) & 0x0fu));
+    entry[26] = static_cast<uint8_t>(first_cluster);
+    entry[27] = static_cast<uint8_t>(first_cluster >> 8);
+    put32(entry, 28, size);
+    return put_directory_entry(g, slot, entry, nullptr);
+}
+
+Status delete_directory_entry(const DirectorySlot& slot)
+{
+    uint8_t entry[32];
+    const Status read = read_directory_entry(slot, entry);
+    if (read != Status::Ok) return read;
+    if (!live_short_entry(entry)) return Status::NotFound;
+    entry[0] = 0xe5;
+    helpers::BpbGeometry g = {};
+    const Status ready = geometry_for_write(g);
+    if (ready != Status::Ok) return ready;
+    return put_directory_entry(g, slot, entry, nullptr);
+}
+
+Status create_directory_entry(uint32_t directory_cluster, const char* name,
+                              const uint8_t entry[32], DirectorySlot& slot)
+{
+    uint8_t encoded[11];
+    if (entry == nullptr || !encode_component(name, encoded)) return Status::InvalidName;
+    helpers::BpbGeometry g = {};
+    const Status ready = geometry_for_write(g);
+    if (ready != Status::Ok) return ready;
+    DirectorySlot found = {};
+    DirectorySlot vacant = {};
+    uint8_t existing[32] = {};
+    uint32_t tail = 0;
+    const Status search = find_in_directory(g, directory_cluster, encoded,
+                                             found, existing, &vacant, &tail);
+    if (search == Status::Ok) return Status::AlreadyExists;
+    if (search != Status::NotFound) return search;
+    uint32_t fresh = 0;
+    if (vacant.lba == 0) {
+        Status status = allocate_chain(1, fresh);
+        if (status != Status::Ok) return status;
+        uint8_t empty[512];
+        volatile uint8_t* clear = empty;
+        for (uint32_t i = 0; i < 512; ++i) clear[i] = 0;
+        for (uint32_t i = 0; i < g.sectors_per_cluster; ++i) {
+            uint32_t lba = 0;
+            if (!directory_lba(g, fresh, i, lba)) {
+                (void)free_chain(fresh);
+                return Status::Corrupt;
+            }
+            if (!storage::write_sector(storage::DiskId::Test, lba, empty)) {
+                (void)free_chain(fresh);
+                return Status::IoError;
+            }
+        }
+        status = write_fat_entry(fresh, 0x0fffffffu);
+        if (status != Status::Ok) {
+            (void)free_chain(fresh);
+            return status;
+        }
+        status = write_fat_entry(tail, fresh);
+        if (status != Status::Ok) {
+            reclaim_if_unlinked(g, tail, fresh);
+            return status;
+        }
+        uint32_t lba = 0;
+        if (!directory_lba(g, fresh, 0, lba)) return Status::Corrupt;
+        vacant = {lba, 0};
+    }
+    uint8_t published[32];
+    for (uint32_t i = 0; i < 32; ++i) published[i] = entry[i];
+    for (uint32_t i = 0; i < 11; ++i) published[i] = encoded[i];
+    bool unchanged = false;
+    const Status publish = put_directory_entry(g, vacant, published, &unchanged);
+    if (publish != Status::Ok) {
+        if (fresh != 0 && unchanged &&
+            write_fat_entry(tail, 0x0fffffffu) == Status::Ok)
+            (void)free_chain(fresh);
+        return Status::IoError;
+    }
+    slot = vacant;
+    return Status::Ok;
+}
 
 Status read_fat_entry(uint32_t cluster, uint32_t& value)
 {

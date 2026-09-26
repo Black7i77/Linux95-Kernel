@@ -9,7 +9,12 @@
 
 namespace {
 
-uint8_t boot[512], fat[2][512], root[512], second_root[512], third_root[512], file_a[512], file_b[512];
+uint8_t boot[512], fat[2][512], other_fat_sector[512], data_sectors[64][512];
+uint8_t (&root)[512] = data_sectors[0];
+uint8_t (&second_root)[512] = data_sectors[1];
+uint8_t (&file_a)[512] = data_sectors[2];
+uint8_t (&file_b)[512] = data_sectors[3];
+uint8_t (&third_root)[512] = data_sectors[4];
 uint32_t writes = 0;
 uint32_t write_attempts = 0;
 uint32_t fail_lba = 0xffffffffu;
@@ -37,11 +42,12 @@ uint32_t get32(const uint8_t* p, uint32_t n) {
     return linux95::filesystem::fat32::helpers::le32(p + n);
 }
 void reset(uint16_t flags = 0) {
+    device.lba28_sector_count = 131072;
     memset(boot, 0, sizeof boot);
     memset(fat, 0, sizeof fat);
+    memset(other_fat_sector, 0xff, sizeof other_fat_sector);
+    memset(data_sectors, 0, sizeof data_sectors);
     memset(root, 0xe5, sizeof root);
-    memset(second_root, 0, sizeof second_root);
-    memset(third_root, 0, sizeof third_root);
     memset(file_a, 'A', sizeof file_a);
     memset(file_b, 'B', sizeof file_b);
     put16(boot, 11, 512); boot[13] = 1; put16(boot, 14, 32);
@@ -72,6 +78,21 @@ void mounted() {
     linux95::filesystem::VolumeInfo v = {};
     assert(linux95::filesystem::fat32::mount(v));
 }
+void fill_root() {
+    for (uint32_t i = 0; i < 16; ++i) {
+        memset(root + i * 32, 0, 32);
+        memset(root + i * 32, ' ', 11);
+        root[i * 32] = 'A' + static_cast<uint8_t>(i);
+        root[i * 32 + 11] = 0x20;
+    }
+}
+void check_invalid_path(const char* path) {
+    linux95::filesystem::fat32::write::ResolvedPath resolved = {};
+    const uint32_t before = write_attempts;
+    assert(linux95::filesystem::fat32::write::resolve_path(path, resolved) ==
+           linux95::filesystem::Status::InvalidName);
+    assert(write_attempts == before);
+}
 } // namespace
 
 namespace linux95::storage {
@@ -81,11 +102,8 @@ bool read_sector(DiskId disk, uint32_t lba, uint8_t* out) {
     if (lba == 0) src = boot;
     if (lba == 32) src = fat[0];
     if (lba == 1042) src = fat[1];
-    if (lba == 2052) src = root;
-    if (lba == 2053) src = second_root;
-    if (lba == 2056) src = third_root;
-    if (lba == 2054) src = file_a;
-    if (lba == 2055) src = file_b;
+    if ((lba > 32 && lba < 1042) || (lba > 1042 && lba < 2052)) src = other_fat_sector;
+    if (lba >= 2052 && lba < 2052 + 64) src = data_sectors[lba - 2052];
     if (!src) return false;
     memcpy(out, src, 512); return true;
 }
@@ -96,7 +114,8 @@ bool write_sector(DiskId disk, uint32_t lba, const uint8_t* in) {
     for (uint32_t i = 0; i < write_failure_count; ++i)
         if (write_attempts == write_failures[i].ordinal && lba == write_failures[i].lba)
             return false;
-    uint8_t* dst = lba == 32 ? fat[0] : lba == 1042 ? fat[1] : nullptr;
+    uint8_t* dst = lba == 32 ? fat[0] : lba == 1042 ? fat[1] :
+        lba >= 2052 && lba < 2052 + 64 ? data_sectors[lba - 2052] : nullptr;
     if (!dst) return false;
     memcpy(dst, in, 512); ++writes; return true;
 }
@@ -216,5 +235,166 @@ int main() {
     assert(write::write_fat_entry(4, 5) == Status::IoError);
     assert(get32(fat[0], 16) == 0xafffffffu && get32(fat[1], 16) == 0xbfffffffu);
     assert(write_attempt_count() == 0 && writes == 0);
+
+    // A wrong punctuation whitelist, case fold, or padding breaks these literals.
+    uint8_t short_name[11] = {};
+    assert(helpers::encode_short_name("mIx.Ed", 6, short_name));
+    assert(memcmp(short_name, "MIX     ED ", 11) == 0);
+    assert(helpers::encode_short_name("AbC12345.xYz", 12, short_name));
+    assert(memcmp(short_name, "ABC12345XYZ", 11) == 0);
+    assert(helpers::encode_short_name("$%'_-@~!.`()", 12, short_name));
+    assert(memcmp(short_name, "$%'_-@~!`()", 11) == 0);
+    assert(helpers::encode_short_name("{}^#&", 5, short_name));
+    assert(memcmp(short_name, "{}^#&      ", 11) == 0);
+    const char* invalid_names[] = {
+        "", ".X", "X.", "X..Y", "ABCDEFGHI", "A.ABCD", ".", "..",
+        "A B", "A\tB", "A\x7f", "A\x80", "A\x01",
+        "A\"B", "A*B", "A+B", "A,B", "A/B", "A:B", "A;B", "A<B",
+        "A=B", "A>B", "A?B", "A[B", "A\\B", "A]B", "A|B", "A\x7e\x7f"
+    };
+    for (const char* name : invalid_names) {
+        assert(!helpers::encode_short_name(name, strlen(name), short_name));
+    }
+    assert(helpers::valid_path_component("A+B", 3)); // legacy read parser stays compatible
+    assert(helpers::encode_short_name("A~B", 3, short_name));
+    assert(!helpers::encode_short_name("A\\B", 3, short_name));
+    assert(!helpers::encode_short_name("A B", 3, short_name));
+
+    reset(); mounted();
+    write::ResolvedPath path = {};
+    assert(write::resolve_path("/dOcS/fIlE.TxT", path) == Status::Ok);
+    assert(path.exists && path.parent_cluster == 3);
+    assert(memcmp(path.name, "FILE    TXT", 11) == 0);
+    assert(write::resolve_path("DOCS/new.txt", path) == Status::Ok);
+    assert(!path.exists && path.parent_cluster == 3);
+    assert(write::resolve_path("/missing/new.txt", path) == Status::NotFound);
+    assert(write::resolve_path("DOCS/FILE.TXT/CHILD", path) == Status::NotDirectory);
+    fail_read_on(2052);
+    assert(write::resolve_path("DOCS/FILE.TXT", path) == Status::IoError);
+    fail_read_on(0xffffffffu);
+    root[26] = 0; root[27] = 0;
+    assert(write::resolve_path("DOCS/FILE.TXT", path) == Status::Corrupt);
+    root[26] = 3;
+    check_invalid_path(""); check_invalid_path("/");
+    check_invalid_path("/DOCS//X"); check_invalid_path("DOCS/");
+    check_invalid_path("//DOCS/X"); check_invalid_path("DOCS/./X");
+    check_invalid_path("DOCS/../X"); check_invalid_path("A?B");
+    check_invalid_path("MISSING/A?B");
+    char long_path[130];
+    for (uint32_t i = 0; i < 126; i += 2) { long_path[i] = 'A'; long_path[i + 1] = '/'; }
+    long_path[126] = 'A'; long_path[127] = 'A'; long_path[128] = 0;
+    check_invalid_path(long_path);
+    long_path[127] = 0;
+    assert(write::resolve_path(long_path, path) == Status::NotFound);
+    assert(writes == 0);
+
+    uint8_t prototype[32] = {};
+    prototype[11] = 0x20;
+    prototype[12] = 0x5a; // unrelated metadata must survive updates
+    prototype[21] = 0xa0; // reserved high cluster bits are not owned by the updater
+    prototype[24] = 0x77;
+    write::DirectorySlot slot = {};
+    assert(write::create_directory_entry(3, "BAD+NAME", prototype, slot) ==
+           Status::InvalidName && write_attempt_count() == 0);
+    assert(write::create_directory_entry(3, "mIx.Ed", prototype, slot) == Status::Ok);
+    uint8_t raw[32] = {};
+    assert(write::find_directory_entry(3, "MIX.ED", slot, raw) == Status::Ok);
+    assert(memcmp(raw, "MIX     ED ", 11) == 0 && raw[12] == 0x5a);
+    uint8_t reread[32] = {};
+    assert(write::read_directory_entry(slot, reread) == Status::Ok);
+    assert(memcmp(raw, reread, 32) == 0);
+    uint8_t new_name[11] = {};
+    assert(helpers::encode_short_name("Renamed.Txt", 11, new_name));
+    assert(write::update_directory_entry(slot, new_name, 7, 1234) == Status::Ok);
+    assert(write::find_directory_entry(3, "renamed.txt", slot, raw) == Status::Ok);
+    assert(raw[11] == 0x20 && raw[12] == 0x5a && raw[21] == 0xa0 &&
+           raw[24] == 0x77 && raw[26] == 7 && get32(raw, 28) == 1234);
+    assert(write::delete_directory_entry(slot) == Status::Ok);
+    assert(write::read_directory_entry(slot, raw) == Status::Ok);
+    assert(raw[0] == 0xe5 && raw[12] == 0x5a && raw[24] == 0x77);
+    assert(write::find_directory_entry(3, "RENAMED.TXT", slot, raw) == Status::NotFound);
+
+    reset(); mounted(); fill_root();
+    memcpy(third_root, "STALE   TXT", 11); third_root[11] = 0x20;
+    assert(write::create_directory_entry(2, "NEW.TXT", prototype, slot) == Status::Ok);
+    assert((get32(fat[0], 8) & 0x0fffffffu) == 6);
+    assert((get32(fat[1], 8) & 0x0fffffffu) == 6);
+    assert((get32(fat[0], 24) & 0x0fffffffu) == 0x0fffffffu);
+    assert(memcmp(third_root, "NEW     TXT", 11) == 0);
+    assert(third_root[32] == 0 && third_root[512 - 1] == 0);
+    assert(write::find_directory_entry(2, "STALE.TXT", slot, raw) == Status::NotFound);
+    assert(write::find_directory_entry(2, "new.txt", slot, raw) == Status::Ok);
+    assert(write::create_directory_entry(2, "SECOND.TXT", prototype, slot) == Status::Ok);
+    assert(write::find_directory_entry(2, "second.txt", slot, raw) == Status::Ok);
+    assert((get32(fat[0], 8) & 0x0fffffffu) == 6);
+
+    // A two-sector cluster must be fully cleared before its link is exposed.
+    reset(); boot[13] = 2; put32(boot, 32, 140000);
+    device.lba28_sector_count = 140000; mounted(); fill_root();
+    for (uint32_t i = 0; i < 16; ++i) {
+        memset(second_root + i * 32, ' ', 11);
+        second_root[i * 32] = 'Q';
+        second_root[i * 32 + 1] = 'A' + static_cast<uint8_t>(i);
+        second_root[i * 32 + 11] = 0x20;
+    }
+    memset(data_sectors[8], 0xa5, 512);
+    memset(data_sectors[9], 0xa5, 512);
+    assert(write::create_directory_entry(2, "WIDE.TXT", prototype, slot) == Status::Ok);
+    assert((get32(fat[0], 8) & 0x0fffffffu) == 6);
+    assert(memcmp(data_sectors[8], "WIDE    TXT", 11) == 0);
+    assert(data_sectors[8][32] == 0 && data_sectors[9][0] == 0 &&
+           data_sectors[9][511] == 0);
+    assert(write::find_directory_entry(2, "WIDE.TXT", slot, raw) == Status::Ok);
+
+    reset(); boot[13] = 2; put32(boot, 32, 140000);
+    device.lba28_sector_count = 140000; mounted(); fill_root();
+    for (uint32_t i = 0; i < 16; ++i) {
+        memset(second_root + i * 32, ' ', 11);
+        second_root[i * 32] = 'Q';
+        second_root[i * 32 + 1] = 'A' + static_cast<uint8_t>(i);
+        second_root[i * 32 + 11] = 0x20;
+    }
+    fail_write_on(4, 2061); // second sector clear; link must not happen
+    assert(write::create_directory_entry(2, "WIDE.TXT", prototype, slot) == Status::IoError);
+    assert((get32(fat[0], 8) & 0x0fffffffu) == 0x0fffffffu);
+    assert((get32(fat[0], 24) & 0x0fffffffu) == 0);
+
+    // Failure at each publication stage leaves no stale or early entry.
+    for (uint32_t stage = 0; stage < 4; ++stage) {
+        reset(); mounted(); fill_root();
+        memset(third_root, 0xa5, sizeof third_root);
+        const uint32_t ordinal[] = {3, 4, 6, 8};
+        const uint32_t lba[] = {2056, 32, 32, 2056};
+        fail_write_on(ordinal[stage], lba[stage]);
+        assert(write::create_directory_entry(2, "NEW.TXT", prototype, slot) == Status::IoError);
+        assert(write::find_directory_entry(2, "NEW.TXT", slot, raw) == Status::NotFound);
+        assert((get32(fat[0], 8) & 0x0fffffffu) == 0x0fffffffu);
+        assert((get32(fat[0], 24) & 0x0fffffffu) == 0);
+        assert((get32(fat[1], 24) & 0x0fffffffu) == 0);
+        assert(write_attempt_count() < 20);
+    }
+    reset(); mounted(); fill_root();
+    fail_write_on(8, 2056); fail_write_on(9, 32); // publication, then unlink rollback
+    assert(write::create_directory_entry(2, "NEW.TXT", prototype, slot) == Status::IoError);
+    assert(write_attempt_count() < 20);
+    assert((get32(fat[0], 8) & 0x0fffffffu) == 6); // keep linked cluster when unlink fails
+
+    reset(); mounted(); fill_root();
+    for (uint32_t cluster = 6; cluster < 128; ++cluster) {
+        put32(fat[0], cluster * 4, 0x0fffffffu);
+        put32(fat[1], cluster * 4, 0x0fffffffu);
+    }
+    assert(write::create_directory_entry(2, "NEW.TXT", prototype, slot) == Status::NoSpace);
+    assert(write_attempt_count() == 0);
+    assert((get32(fat[0], 8) & 0x0fffffffu) == 0x0fffffffu);
+
+    reset(); mounted(); fill_root();
+    put32(fat[0], 8, 129022); put32(fat[1], 8, 129022);
+    assert(write::find_directory_entry(2, "LOST.TXT", slot, raw) == Status::Corrupt);
+    assert(write_attempt_count() == 0);
+    reset(); mounted(); fill_root();
+    put32(fat[0], 8, 2); put32(fat[1], 8, 2);
+    assert(write::find_directory_entry(2, "LOST.TXT", slot, raw) == Status::Corrupt);
+    assert(write_attempt_count() == 0);
     puts("fat32 write tests: PASS");
 }
