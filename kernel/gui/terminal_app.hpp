@@ -18,6 +18,7 @@ private:
     TerminalModel model_;
     terminal::Output output_;
     terminal::NetworkCallbacks network_callbacks_;
+    terminal::DnsCallbacks dns_callbacks_;
     terminal::ShellSession session_;
 
     void draw(

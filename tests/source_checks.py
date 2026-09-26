@@ -125,6 +125,35 @@ def require_udp_contract():
     if "tests/qemu_smoke.py --udp-network-test" not in qemu_recipe:
         raise SystemExit("FAIL: make test-qemu lacks real UDP echo mode")
 
+def require_dns_qemu_isolation():
+    kernel = (ROOT / "kernel/kernel.cpp").read_text()
+    autostart = re.search(
+        r'#ifdef LINUX95_QEMU_DNS_SELF_TEST\s*'
+        r'\(void\)net::dns::begin_lookup\("example\.com"\);\s*#endif',
+        kernel,
+    )
+    if autostart is None or "net::dns::begin_lookup(" in kernel.replace(
+            autostart.group(), ""):
+        raise SystemExit("FAIL: DNS autostart is not confined to its QEMU guard")
+
+    makefile = (ROOT / "Makefile").read_text()
+    for normal, next_target in (
+            ("kernel.o", "kernel-network-test.o"),
+            ("network.o", "network-dns-network-test.o"),
+            ("dns.o", "dns-dns-network-test.o")):
+        recipe = makefile.split(f"$(BUILD)/{normal}:", 1)[1].split(
+            f"$(BUILD)/{next_target}:", 1)[0]
+        if "-DLINUX95_QEMU_DNS_SELF_TEST" in recipe:
+            raise SystemExit(f"FAIL: ordinary {normal} enables DNS self-test")
+    qemu_recipe = makefile.split("test-qemu:", 1)[1].split("\nrun:", 1)[0]
+    modes = ("tests/qemu_smoke.py\n", "tests/qemu_smoke.py --udp-network-test",
+             "tests/qemu_smoke.py --dns-network-test",
+             "tests/qemu_smoke.py --without-network",
+             "tests/qemu_smoke.py --process-preemption-test")
+    positions = [qemu_recipe.find(mode) for mode in modes]
+    if any(position < 0 for position in positions) or positions != sorted(positions):
+        raise SystemExit("FAIL: DNS QEMU mode displaced existing smoke coverage")
+
 require("kernel/boot_info.hpp", "static_assert(sizeof(FramebufferInfo) == 28")
 require("kernel/boot_info.hpp", "static_assert(sizeof(BootInfo) == 45")
 require("kernel/boot_info.hpp", "static_assert(sizeof(E820Entry) == 24")
@@ -270,6 +299,7 @@ if "FAULT.ELF" in kernel_startup:
 require_rtl8139_hardware_isolation()
 require_network_coordinator_contract()
 require_udp_contract()
+require_dns_qemu_isolation()
 
 if "Linux95 Kernel v0.1" in (ROOT / "kernel/kernel.cpp").read_text():
     raise SystemExit("FAIL: stale v0.1 kernel banner found")

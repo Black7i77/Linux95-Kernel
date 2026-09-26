@@ -2,6 +2,7 @@
 
 #include "graphics/renderer.hpp"
 #include "net/network.hpp"
+#include "net/dns.hpp"
 #include "terminal/shell.hpp"
 
 #include <stddef.h>
@@ -45,6 +46,36 @@ void network_clear_ping_result(void*)
     network::clear_ping_result();
 }
 
+net::dns::Status dns_begin_lookup(void*, const char* hostname)
+{
+    return net::dns::begin_lookup(hostname);
+}
+
+net::dns::Status dns_lookup_status(void*)
+{
+    return net::dns::lookup_status();
+}
+
+size_t dns_result_count(void*)
+{
+    return net::dns::result_count();
+}
+
+bool dns_result_address(void*, size_t index, net::Ipv4Address& out)
+{
+    return net::dns::result_address(index, out);
+}
+
+net::Ipv4Address dns_server(void*)
+{
+    return net::dns::server();
+}
+
+net::dns::Status dns_set_server(void*, const net::Ipv4Address& address)
+{
+    return net::dns::set_server(address);
+}
+
 void execute_shell_command(
     void*,
     terminal::Output& output,
@@ -74,11 +105,21 @@ TerminalApp::TerminalApp()
           network_ping_result,
           network_clear_ping_result,
       },
+      dns_callbacks_{
+          nullptr,
+          dns_begin_lookup,
+          dns_lookup_status,
+          dns_result_count,
+          dns_result_address,
+          dns_server,
+          dns_set_server,
+      },
       session_(
           output_,
           nullptr,
           execute_shell_command,
-          &network_callbacks_)
+          &network_callbacks_,
+          &dns_callbacks_)
 {
     session_.begin();
 }

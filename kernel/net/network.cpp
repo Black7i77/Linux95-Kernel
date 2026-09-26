@@ -45,6 +45,9 @@ uint16_t g_next_identification = 1;
 net::udp::bindings::Table g_udp_bindings{};
 struct PendingUdp {
     bool occupied;
+#ifdef LINUX95_QEMU_DNS_SELF_TEST
+    bool dns_probe;
+#endif
     net::Ipv4Address next_hop;
     uint16_t packet_length;
     uint64_t deadline;
@@ -240,6 +243,11 @@ void handle_arp(const net::EthernetView& frame)
                                   g_pending_udp.packet,
                                   g_pending_udp.packet_length)) {
                 report_udp_tx();
+#ifdef LINUX95_QEMU_DNS_SELF_TEST
+                if (g_pending_udp.dns_probe) {
+                    diagnostic("[PASS] dns_arp_next_hop_resolved 10.0.2.3\n");
+                }
+#endif
             }
         }
     }
@@ -416,6 +424,12 @@ bool send_udp(const net::Ipv4Address& destination,
         g_pending_udp.packet[i] = packet[i];
     }
     g_pending_udp.next_hop = next_hop;
+#ifdef LINUX95_QEMU_DNS_SELF_TEST
+    g_pending_udp.dns_probe =
+        ipv4_equals(destination, net::Ipv4Address{{10, 0, 2, 3}}) &&
+        ipv4_equals(next_hop, destination) &&
+        source_port == 53000 && destination_port == 53;
+#endif
     g_pending_udp.packet_length = packet_length;
     g_pending_udp.deadline = pit::uptime_seconds() + kArpTimeoutSeconds;
     g_pending_udp.occupied = true;

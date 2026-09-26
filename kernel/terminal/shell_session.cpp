@@ -48,6 +48,45 @@ void write_mac(Output& output, const net::MacAddress& address)
     }
 }
 
+void write_dns_status(Output& output, net::dns::Status status)
+{
+    switch (status) {
+    case net::dns::Status::InvalidName:
+        write(output, "dns: invalid hostname\n");
+        break;
+    case net::dns::Status::NotFound:
+        write(output, "dns: name not found\n");
+        break;
+    case net::dns::Status::ServerFailure:
+        write(output, "dns: server failure\n");
+        break;
+    case net::dns::Status::MalformedResponse:
+        write(output, "dns: malformed response\n");
+        break;
+    case net::dns::Status::TruncatedResponse:
+        write(output, "dns: truncated response (TCP unsupported)\n");
+        break;
+    case net::dns::Status::CnameLoopOrLimit:
+        write(output, "dns: CNAME loop or limit\n");
+        break;
+    case net::dns::Status::TimedOut:
+        write(output, "dns: timed out\n");
+        break;
+    case net::dns::Status::NetworkUnavailable:
+        write(output, "dns: network unavailable\n");
+        break;
+    case net::dns::Status::Busy:
+        write(output, "dns: lookup already in progress\n");
+        break;
+    case net::dns::Status::Idle:
+        write(output, "dns: no result\n");
+        break;
+    case net::dns::Status::Success:
+    case net::dns::Status::Pending:
+        break;
+    }
+}
+
 } // namespace
 
 bool parse_ipv4(
@@ -94,14 +133,17 @@ ShellSession::ShellSession(
     Output& output,
     void* context,
     ExecuteCallback execute,
-    const NetworkCallbacks* network_callbacks)
+    const NetworkCallbacks* network_callbacks,
+    const DnsCallbacks* dns_callbacks)
     : output_(output),
       execute_context_(context),
       execute_(execute),
       network_callbacks_(network_callbacks),
-      command_{},
+      dns_callbacks_(dns_callbacks),
+      dns_pending_(false),
       length_(0)
 {
+    command_[0] = '\0';
 }
 
 bool ShellSession::execute_network_command()
@@ -166,6 +208,69 @@ bool ShellSession::execute_network_command()
     return true;
 }
 
+bool ShellSession::execute_dns_command()
+{
+    const char* command = command_;
+    while (*command == ' ') {
+        ++command;
+    }
+
+    if (word_equals(command, "dnsserver")) {
+        const char* argument = command_argument(command);
+        if (dns_callbacks_ == nullptr || dns_callbacks_->server == nullptr) {
+            write(output_, "dnsserver: unavailable\n");
+            return true;
+        }
+        if (argument != nullptr) {
+            net::Ipv4Address address{};
+            if (!parse_ipv4(argument, address)) {
+                write(output_, "usage: dnsserver [IPv4 address]\n");
+            } else if (dns_callbacks_->set_server == nullptr) {
+                write(output_, "dnsserver: unavailable\n");
+            } else {
+                const net::dns::Status status = dns_callbacks_->set_server(
+                    dns_callbacks_->context, address);
+                if (status == net::dns::Status::Busy) {
+                    write(output_, "dnsserver: lookup in progress\n");
+                }
+            }
+        }
+        write(output_, "dns server: ");
+        write_ipv4(output_, dns_callbacks_->server(dns_callbacks_->context));
+        write(output_, "\n");
+        return true;
+    }
+
+    if (!word_equals(command, "dns")) {
+        return false;
+    }
+
+    const char* argument = command_argument(command);
+    if (argument == nullptr) {
+        write(output_, "usage: dns <hostname>\n");
+        return true;
+    }
+    for (const char* cursor = argument; *cursor != '\0'; ++cursor) {
+        if (*cursor == ' ') {
+            write(output_, "usage: dns <hostname>\n");
+            return true;
+        }
+    }
+    if (dns_callbacks_ == nullptr || dns_callbacks_->begin_lookup == nullptr) {
+        write_dns_status(output_, net::dns::Status::NetworkUnavailable);
+        return true;
+    }
+
+    const net::dns::Status status = dns_callbacks_->begin_lookup(
+        dns_callbacks_->context, argument);
+    if (status == net::dns::Status::Pending) {
+        dns_pending_ = true;
+    } else {
+        write_dns_status(output_, status);
+    }
+    return true;
+}
+
 void ShellSession::prompt()
 {
     write(
@@ -175,6 +280,7 @@ void ShellSession::prompt()
 
 void ShellSession::begin()
 {
+    dns_pending_ = false;
     length_ = 0;
     command_[0] = '\0';
 
@@ -183,6 +289,10 @@ void ShellSession::begin()
 
 void ShellSession::on_char(char c)
 {
+    if (dns_pending_) {
+        return;
+    }
+
     if (c == '\n') {
         if (output_.put_char != nullptr) {
             output_.put_char(
@@ -192,7 +302,8 @@ void ShellSession::on_char(char c)
 
         command_[length_] = '\0';
 
-        if (!execute_network_command() && execute_ != nullptr) {
+        if (!execute_network_command() &&
+            !execute_dns_command() && execute_ != nullptr) {
             execute_(
                 execute_context_,
                 output_,
@@ -202,7 +313,9 @@ void ShellSession::on_char(char c)
         length_ = 0;
         command_[0] = '\0';
 
-        prompt();
+        if (!dns_pending_) {
+            prompt();
+        }
         return;
     }
 
@@ -245,40 +358,66 @@ void ShellSession::on_char(char c)
 
 bool ShellSession::poll()
 {
-    if (network_callbacks_ == nullptr ||
-        network_callbacks_->ping_result == nullptr) {
-        return false;
+    bool changed = false;
+    if (network_callbacks_ != nullptr &&
+        network_callbacks_->ping_result != nullptr) {
+        const net::icmp::PingResult result =
+            network_callbacks_->ping_result(network_callbacks_->context);
+        if (result.state == net::icmp::PingState::ReplyReceived ||
+            result.state == net::icmp::PingState::HostUnreachable ||
+            result.state == net::icmp::PingState::TimedOut) {
+            write(output_, "\n");
+            if (result.state == net::icmp::PingState::ReplyReceived) {
+                write_uint(output_, result.payload_bytes);
+                write(output_, " bytes from ");
+                write_ipv4(output_, result.address);
+                write(output_, ": icmp_seq=");
+                write_uint(output_, result.sequence);
+                write(output_, "\n");
+            } else if (result.state == net::icmp::PingState::HostUnreachable) {
+                write(output_, "ping: host unreachable\n");
+            } else {
+                write(output_, "Request timeout for ");
+                write_ipv4(output_, result.address);
+                write(output_, "\n");
+            }
+            if (network_callbacks_->clear_ping_result != nullptr) {
+                network_callbacks_->clear_ping_result(network_callbacks_->context);
+            }
+            if (!dns_pending_) {
+                prompt();
+            }
+            changed = true;
+        }
     }
 
-    const net::icmp::PingResult result =
-        network_callbacks_->ping_result(network_callbacks_->context);
-    if (result.state != net::icmp::PingState::ReplyReceived &&
-        result.state != net::icmp::PingState::HostUnreachable &&
-        result.state != net::icmp::PingState::TimedOut) {
-        return false;
+    if (dns_pending_ && dns_callbacks_ != nullptr &&
+        dns_callbacks_->lookup_status != nullptr) {
+        const net::dns::Status status = dns_callbacks_->lookup_status(
+            dns_callbacks_->context);
+        if (status != net::dns::Status::Pending) {
+            if (status == net::dns::Status::Success) {
+                const size_t count = dns_callbacks_->result_count != nullptr
+                    ? dns_callbacks_->result_count(dns_callbacks_->context) : 0;
+                for (size_t index = 0; index < count && index < 8; ++index) {
+                    net::Ipv4Address address{};
+                    if (dns_callbacks_->result_address != nullptr &&
+                        dns_callbacks_->result_address(
+                            dns_callbacks_->context, index, address)) {
+                        write(output_, "dns: ");
+                        write_ipv4(output_, address);
+                        write(output_, "\n");
+                    }
+                }
+            } else {
+                write_dns_status(output_, status);
+            }
+            dns_pending_ = false;
+            prompt();
+            changed = true;
+        }
     }
-
-    write(output_, "\n");
-    if (result.state == net::icmp::PingState::ReplyReceived) {
-        write_uint(output_, result.payload_bytes);
-        write(output_, " bytes from ");
-        write_ipv4(output_, result.address);
-        write(output_, ": icmp_seq=");
-        write_uint(output_, result.sequence);
-        write(output_, "\n");
-    } else if (result.state == net::icmp::PingState::HostUnreachable) {
-        write(output_, "ping: host unreachable\n");
-    } else if (result.state == net::icmp::PingState::TimedOut) {
-        write(output_, "Request timeout for ");
-        write_ipv4(output_, result.address);
-        write(output_, "\n");
-    }
-
-    if (network_callbacks_->clear_ping_result != nullptr) {
-        network_callbacks_->clear_ping_result(network_callbacks_->context);
-    }
-    prompt();
-    return true;
+    return changed;
 }
 
 } // namespace linux95::terminal

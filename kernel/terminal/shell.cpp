@@ -9,6 +9,7 @@
 #include "memory/memory.hpp"
 #include "memory/physical.hpp"
 #include "net/network.hpp"
+#include "net/dns.hpp"
 #include "filesystem/filesystem.hpp"
 #include "filesystem/vfs.hpp"
 #include "storage/disk.hpp"
@@ -88,6 +89,8 @@ void print_help(terminal::Output& output)
     terminal::write(output, "  uptime   Show uptime in seconds\n");
     terminal::write(output, "  ip       Show network configuration\n");
     terminal::write(output, "  ping <IPv4 address> Send ICMP Echo Request\n");
+    terminal::write(output, "  dns <hostname> Resolve IPv4 addresses\n");
+    terminal::write(output, "  dnsserver [IPv4 address] Show or set DNS server\n");
     terminal::write(output, "  reboot   Reboot the machine\n");
 }
 
@@ -493,6 +496,36 @@ void network_clear_ping_result(void*)
     network::clear_ping_result();
 }
 
+net::dns::Status dns_begin_lookup(void*, const char* hostname)
+{
+    return net::dns::begin_lookup(hostname);
+}
+
+net::dns::Status dns_lookup_status(void*)
+{
+    return net::dns::lookup_status();
+}
+
+size_t dns_result_count(void*)
+{
+    return net::dns::result_count();
+}
+
+bool dns_result_address(void*, size_t index, net::Ipv4Address& out)
+{
+    return net::dns::result_address(index, out);
+}
+
+net::Ipv4Address dns_server(void*)
+{
+    return net::dns::server();
+}
+
+net::dns::Status dns_set_server(void*, const net::Ipv4Address& address)
+{
+    return net::dns::set_server(address);
+}
+
 void execute_session_command(
     void*,
     terminal::Output& output,
@@ -518,16 +551,28 @@ void execute_session_command(
         network_clear_ping_result,
     };
 
+    terminal::DnsCallbacks dns_callbacks{
+        nullptr,
+        dns_begin_lookup,
+        dns_lookup_status,
+        dns_result_count,
+        dns_result_address,
+        dns_server,
+        dns_set_server,
+    };
+
     terminal::ShellSession session(
         output,
         nullptr,
         execute_session_command,
-        &network_callbacks);
+        &network_callbacks,
+        &dns_callbacks);
 
     session.begin();
 
     for (;;) {
         network::poll();
+        net::dns::poll();
         (void)session.poll();
 
         if (!keyboard::has_char()) {
