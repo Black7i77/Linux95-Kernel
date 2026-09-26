@@ -8,6 +8,8 @@ import sys
 import threading
 import time
 
+from qemu_smoke_policy import grace_complete
+
 WITHOUT_NETWORK = "--without-network" in sys.argv[1:]
 PROCESS_SELF_TEST = "--process-self-test" in sys.argv[1:]
 PROCESS_FAULT_TEST = "--process-fault-test" in sys.argv[1:]
@@ -147,7 +149,6 @@ cmd = [
     "-serial", "none",
     "-monitor", "none",
     "-no-reboot",
-    "-no-shutdown",
     "-debugcon", f"file:{LOG}",
     "-global", "isa-debugcon.iobase=0xe9",
 ]
@@ -197,7 +198,8 @@ try:
                 if UDP_NETWORK_TEST:
                     if completion_seen_at is None:
                         completion_seen_at = time.monotonic()
-                    elif time.monotonic() - completion_seen_at >= 1.0:
+                    elif grace_complete(completion_seen_at, time.monotonic(),
+                                        deadline):
                         saw_completion = True
                         break
                 elif not (PROCESS_SELF_TEST or PROCESS_FAULT_TEST or
@@ -206,7 +208,8 @@ try:
                     break
                 elif completion_seen_at is None:
                     completion_seen_at = time.monotonic()
-                elif time.monotonic() - completion_seen_at >= 1.0:
+                elif grace_complete(completion_seen_at, time.monotonic(),
+                                    deadline):
                     saw_completion = True
                     break
 
@@ -234,6 +237,13 @@ if early_exit is not None and not saw_completion:
     print(f"QEMU exited early with status {early_exit}")
     if stderr.strip():
         print(stderr.strip())
+    print("--- debug log ---")
+    print(content or "(empty)")
+    sys.exit(1)
+
+if not saw_completion:
+    print("qemu smoke test: FAIL")
+    print("completion observation did not finish before deadline")
     print("--- debug log ---")
     print(content or "(empty)")
     sys.exit(1)
