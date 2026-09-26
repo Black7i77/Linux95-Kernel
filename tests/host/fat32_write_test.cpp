@@ -93,6 +93,24 @@ void check_invalid_path(const char* path) {
            linux95::filesystem::Status::InvalidName);
     assert(write_attempts == before);
 }
+void seed_file_chain() {
+    put32(fat[0], 16, 5); put32(fat[1], 16, 5);
+}
+void check_file(const char* path, const uint8_t* expected, size_t length) {
+    uint8_t actual[2048] = {};
+    size_t read = 0;
+    uint32_t size = 0;
+    assert(length <= sizeof actual);
+    assert(linux95::filesystem::fat32::read_file(path, 0, actual,
+        sizeof actual, read, size) == linux95::filesystem::Status::Ok);
+    assert(size == length && read == length);
+    assert(memcmp(actual, expected, length) == 0);
+}
+void check_old_file() {
+    uint8_t expected[1024];
+    memset(expected, 'A', 512); memset(expected + 512, 'B', 512);
+    check_file("DOCS/FILE.TXT", expected, sizeof expected);
+}
 } // namespace
 
 namespace linux95::storage {
@@ -449,5 +467,121 @@ int main() {
         assert(write::create_directory_entry(3, "NEW.TXT", prototype, slot) == Status::Corrupt);
         assert(write_attempt_count() == 0);
     }
+
+    // Touch creates an empty file and does not change an existing file at all.
+    reset(); mounted(); seed_file_chain();
+    second_root[12] = 0x5a; second_root[24] = 0x77;
+    uint8_t before_entry[32]; memcpy(before_entry, second_root, 32);
+    assert(write::touch("/docs/new.txt") == Status::Ok);
+    assert(memcmp(second_root + 32, "NEW     TXT", 11) == 0);
+    assert(second_root[32 + 11] == 0x20 && get32(second_root + 32, 28) == 0);
+    assert(second_root[32 + 20] == 0 && second_root[32 + 26] == 0);
+    check_file("DOCS/NEW.TXT", nullptr, 0);
+    const uint32_t after_create = write_attempt_count();
+    assert(write::touch("docs/file.txt") == Status::Ok);
+    assert(write_attempt_count() == after_create);
+    assert(memcmp(before_entry, second_root, 32) == 0);
+    check_old_file();
+    assert(write::touch("DOCS") == Status::IsDirectory);
+    assert(write::write_file("DOCS", nullptr, 0) == Status::IsDirectory);
+    assert(write::touch("MISSING/X.TXT") == Status::NotFound);
+    assert(write::touch("DOCS/FILE.TXT/X") == Status::NotDirectory);
+
+    // The byte API accepts NUL/non-text bytes and streams across clusters.
+    reset(); mounted(); seed_file_chain();
+    uint8_t bytes[1537];
+    for (size_t i = 0; i < sizeof bytes; ++i)
+        bytes[i] = static_cast<uint8_t>((i * 37u) & 0xffu);
+    assert(write::write_file("DOCS/FILE.TXT", bytes, sizeof bytes) == Status::Ok);
+    check_file("DOCS/FILE.TXT", bytes, sizeof bytes);
+    assert(get32(second_root, 28) == sizeof bytes && second_root[26] == 6);
+    assert((get32(fat[0], 24) & 0x0fffffffu) == 7);
+    assert((get32(fat[1], 36) & 0x0fffffffu) == 0x0fffffffu);
+    assert((get32(fat[0], 16) & 0x0fffffffu) == 0);
+    assert((get32(fat[1], 20) & 0x0fffffffu) == 0);
+    assert(write::write_file("DOCS/FILE.TXT", bytes, 17) == Status::Ok);
+    check_file("DOCS/FILE.TXT", bytes, 17);
+    assert(write::write_file("DOCS/FILE.TXT", nullptr, 0) == Status::Ok);
+    check_file("DOCS/FILE.TXT", nullptr, 0);
+    assert(second_root[26] == 0 && get32(second_root, 28) == 0);
+    assert(write::write_file("DOCS/FILE.TXT", bytes, 1025) == Status::Ok);
+    check_file("DOCS/FILE.TXT", bytes, 1025);
+
+    const size_t boundary_lengths[] = {511, 512, 513};
+    for (size_t length : boundary_lengths) {
+        reset(); mounted();
+        assert(write::write_file("DOCS/NEW.TXT", bytes, length) == Status::Ok);
+        check_file("DOCS/NEW.TXT", bytes, length);
+        assert(get32(second_root + 32, 28) == length);
+        assert((get32(fat[0], 24) & 0x0fffffffu) ==
+            (length == 513 ? 7u : 0x0fffffffu));
+    }
+
+    // Reject impossible sizes before even looking at a sentinel data pointer.
+    reset(); mounted(); seed_file_chain();
+    const uint8_t* unreadable = reinterpret_cast<const uint8_t*>(uintptr_t(1));
+    assert(write::write_file("DOCS/FILE.TXT", unreadable,
+        size_t(UINT32_MAX) + 1u) == Status::Unsupported);
+    assert(write_attempt_count() == 0);
+    check_old_file();
+    assert(write::write_file("DOCS/FILE.TXT", nullptr, 1) != Status::Ok);
+    assert(write_attempt_count() == 0);
+    assert(write::write_file("DOCS/BAD?.TXT", bytes, 1) == Status::InvalidName);
+    assert(write_attempt_count() == 0);
+    reset(0x0081); mounted();
+    assert(write::touch("DOCS/NEW.TXT") == Status::Unsupported);
+    assert(write::write_file("DOCS/NEW.TXT", bytes, 1) == Status::Unsupported);
+    assert(write_attempt_count() == 0);
+
+    // Every prepublication failure retains the original entry and bytes.
+    reset(); mounted(); seed_file_chain();
+    for (uint32_t cluster = 6; cluster < 128; ++cluster) {
+        put32(fat[0], cluster * 4, 0x0fffffffu);
+        put32(fat[1], cluster * 4, 0x0fffffffu);
+    }
+    assert(write::write_file("DOCS/FILE.TXT", bytes, 513) == Status::NoSpace);
+    assert(write_attempt_count() == 0);
+    check_old_file();
+
+    reset(); mounted(); seed_file_chain();
+    fail_write_on(2, 1042); // secondary FAT copy during allocation
+    assert(write::write_file("DOCS/FILE.TXT", bytes, 17) == Status::IoError);
+    assert(second_root[26] == 4 && get32(second_root, 28) == 1024);
+    check_old_file();
+
+    reset(); mounted(); seed_file_chain();
+    fail_write_on(6, 1042); // secondary copy while linking a two-cluster chain
+    assert(write::write_file("DOCS/FILE.TXT", bytes, 513) == Status::IoError);
+    assert(second_root[26] == 4 && get32(second_root, 28) == 1024);
+    check_old_file();
+
+    reset(); mounted(); seed_file_chain();
+    fail_lba = 2056; // new data sector
+    assert(write::write_file("DOCS/FILE.TXT", bytes, 17) == Status::IoError);
+    assert(second_root[26] == 4 && get32(second_root, 28) == 1024);
+    check_old_file();
+    assert((get32(fat[0], 24) & 0x0fffffffu) == 0);
+
+    reset(); mounted(); seed_file_chain();
+    fail_write_on(4, 2053); // directory publication
+    assert(write::write_file("DOCS/FILE.TXT", bytes, 17) == Status::IoError);
+    assert(second_root[26] == 4 && get32(second_root, 28) == 1024);
+    check_old_file();
+    assert((get32(fat[0], 24) & 0x0fffffffu) == 0);
+
+    reset(); mounted(); seed_file_chain();
+    fail_write_on(3, 2056); // data write, then new-chain cleanup fails
+    fail_write_on(4, 32);
+    assert(write::write_file("DOCS/FILE.TXT", bytes, 17) == Status::IoError);
+    assert(second_root[26] == 4 && get32(second_root, 28) == 1024);
+    check_old_file();
+
+    reset(); mounted(); seed_file_chain();
+    fail_write_on(6, 1042); // old-chain free after new entry is published
+    assert(write::write_file("DOCS/FILE.TXT", bytes, 17) == Status::IoError);
+    check_file("DOCS/FILE.TXT", bytes, 17);
+    assert(second_root[26] == 6 && get32(second_root, 28) == 17);
+    assert((get32(fat[0], 24) & 0x0fffffffu) == 0x0fffffffu);
+
     puts("fat32 write tests: PASS");
 }

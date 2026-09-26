@@ -17,6 +17,9 @@ struct ResolvedPath {
     uint8_t entry[32];
 };
 
+Status touch(const char* path);
+Status write_file(const char* path, const uint8_t* data, size_t size);
+
 Status resolve_path(const char* path, ResolvedPath& result);
 Status find_directory_entry(uint32_t directory_cluster, const char* name,
                             DirectorySlot& slot, uint8_t entry[32]);
