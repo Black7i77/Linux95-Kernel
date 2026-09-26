@@ -43,6 +43,14 @@ uint64_t g_deadline = 0;
 uint16_t g_next_sequence = 1;
 uint16_t g_next_identification = 1;
 net::udp::bindings::Table g_udp_bindings{};
+struct PendingUdp {
+    bool occupied;
+    net::Ipv4Address next_hop;
+    uint16_t packet_length;
+    uint64_t deadline;
+    uint8_t packet[kMaxIpv4Length];
+};
+PendingUdp g_pending_udp{};
 
 void diagnostic(const char* message)
 {
@@ -213,6 +221,17 @@ void handle_arp(const net::EthernetView& frame)
             }
         }
     }
+
+    if (g_pending_udp.occupied) {
+        if (pit::uptime_seconds() >= g_pending_udp.deadline) {
+            g_pending_udp.occupied = false;
+        } else if (ipv4_equals(sender_ip, g_pending_udp.next_hop)) {
+            g_pending_udp.occupied = false;
+            (void)transmit_ethernet(sender_mac, net::EtherType::Ipv4,
+                                    g_pending_udp.packet,
+                                    g_pending_udp.packet_length);
+        }
+    }
 }
 
 void handle_ipv4(const net::EthernetView& frame)
@@ -272,6 +291,9 @@ void dispatch_frame(const uint8_t* bytes, uint16_t length)
 void advance_timeout()
 {
     const uint64_t now = pit::uptime_seconds();
+    if (g_pending_udp.occupied && now >= g_pending_udp.deadline) {
+        g_pending_udp.occupied = false;
+    }
     if (g_ping.state == net::icmp::PingState::ResolvingArp &&
         now >= g_deadline) {
         g_ping.state = net::icmp::PingState::HostUnreachable;
@@ -296,6 +318,7 @@ bool initialize()
     g_deadline = 0;
     g_next_sequence = 1;
     g_next_identification = 1;
+    g_pending_udp.occupied = false;
     net::arp::reset();
     g_udp_bindings = net::udp::bindings::Table{};
 
@@ -327,6 +350,64 @@ bool bind_udp_port(uint16_t port, UdpReceiveCallback callback, void* context)
 bool unbind_udp_port(uint16_t port)
 {
     return g_udp_bindings.unbind(port);
+}
+
+bool send_udp(const net::Ipv4Address& destination,
+              uint16_t source_port,
+              uint16_t destination_port,
+              const uint8_t* payload,
+              uint16_t payload_length)
+{
+    if (!g_status.online || source_port == 0 || destination_port == 0 ||
+        (payload == nullptr && payload_length != 0) ||
+        payload_length > net::udp::kMaxPayloadLength) {
+        return false;
+    }
+
+    const net::Ipv4Address next_hop = net::ipv4::next_hop(
+        destination, g_status.ip, g_status.netmask, g_status.gateway);
+    net::MacAddress next_hop_mac{};
+    const bool cached = net::arp::lookup(next_hop, next_hop_mac);
+    if (!cached && g_pending_udp.occupied &&
+        pit::uptime_seconds() >= g_pending_udp.deadline) {
+        g_pending_udp.occupied = false;
+    }
+    if (!cached && g_pending_udp.occupied) {
+        return false;
+    }
+
+    uint8_t datagram[net::udp::kHeaderLength + net::udp::kMaxPayloadLength];
+    uint16_t datagram_length = 0;
+    if (!net::udp::build(datagram, sizeof(datagram), g_status.ip,
+                         destination, source_port, destination_port,
+                         payload, payload_length, datagram_length)) {
+        return false;
+    }
+    uint8_t packet[kMaxIpv4Length];
+    uint16_t packet_length = 0;
+    if (!net::ipv4::build(packet, sizeof(packet), g_status.ip, destination,
+                          kUdpProtocol, g_next_identification++, datagram,
+                          datagram_length, packet_length)) {
+        return false;
+    }
+
+    if (cached) {
+        return transmit_ethernet(next_hop_mac, net::EtherType::Ipv4,
+                                 packet, packet_length);
+    }
+
+    for (uint16_t i = 0; i < packet_length; ++i) {
+        g_pending_udp.packet[i] = packet[i];
+    }
+    g_pending_udp.next_hop = next_hop;
+    g_pending_udp.packet_length = packet_length;
+    g_pending_udp.deadline = pit::uptime_seconds() + kArpTimeoutSeconds;
+    g_pending_udp.occupied = true;
+    if (!transmit_arp_request(next_hop)) {
+        g_pending_udp.occupied = false;
+        return false;
+    }
+    return true;
 }
 
 void poll()
