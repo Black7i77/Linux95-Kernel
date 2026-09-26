@@ -23,6 +23,7 @@
 #include "syscall/syscall.hpp"
 #include "user/elf.hpp"
 #include "net/network.hpp"
+#include "net/dns.hpp"
 #include "panic/panic.hpp"
 #include "pci/pci.hpp"
 #include "filesystem/filesystem.hpp"
@@ -305,6 +306,9 @@ extern "C" [[noreturn]] void linux95_higher_half_entry(
     debug::write("[PASS] pci_bus_ready\n");
     if (!network::initialize()) {
         debug::write("[WARN] network_offline\n");
+    }
+    if (!net::dns::initialize()) {
+        debug::write("[WARN] dns_offline\n");
     }
 
     arch::x86_64::initialize_segments();
