@@ -51,6 +51,8 @@ struct PendingUdp {
     uint8_t packet[kMaxIpv4Length];
 };
 PendingUdp g_pending_udp{};
+bool g_udp_tx_reported = false;
+bool g_udp_rx_reported = false;
 
 void diagnostic(const char* message)
 {
@@ -59,6 +61,14 @@ void diagnostic(const char* message)
 #else
     (void)message;
 #endif
+}
+
+void report_udp_tx()
+{
+    if (!g_udp_tx_reported) {
+        diagnostic("[PASS] udp_tx\n");
+        g_udp_tx_reported = true;
+    }
 }
 
 bool mac_equals(
@@ -227,9 +237,11 @@ void handle_arp(const net::EthernetView& frame)
             g_pending_udp.occupied = false;
         } else if (ipv4_equals(sender_ip, g_pending_udp.next_hop)) {
             g_pending_udp.occupied = false;
-            (void)transmit_ethernet(sender_mac, net::EtherType::Ipv4,
-                                    g_pending_udp.packet,
-                                    g_pending_udp.packet_length);
+            if (transmit_ethernet(sender_mac, net::EtherType::Ipv4,
+                                  g_pending_udp.packet,
+                                  g_pending_udp.packet_length)) {
+                report_udp_tx();
+            }
         }
     }
 }
@@ -265,9 +277,14 @@ void handle_ipv4(const net::EthernetView& frame)
         net::udp::DatagramView datagram{};
         if (net::udp::parse(packet.payload, packet.payload_length,
                             packet.source, packet.destination, datagram)) {
-            g_udp_bindings.dispatch(packet.source, datagram.source_port,
-                                    datagram.destination_port, datagram.payload,
-                                    datagram.payload_length);
+            if (g_udp_bindings.dispatch(packet.source, datagram.source_port,
+                                        datagram.destination_port,
+                                        datagram.payload,
+                                        datagram.payload_length) &&
+                !g_udp_rx_reported) {
+                diagnostic("[PASS] udp_rx\n");
+                g_udp_rx_reported = true;
+            }
         }
     }
 }
@@ -319,6 +336,8 @@ bool initialize()
     g_next_sequence = 1;
     g_next_identification = 1;
     g_pending_udp.occupied = false;
+    g_udp_tx_reported = false;
+    g_udp_rx_reported = false;
     net::arp::reset();
     g_udp_bindings = net::udp::bindings::Table{};
 
@@ -392,8 +411,12 @@ bool send_udp(const net::Ipv4Address& destination,
     }
 
     if (cached) {
-        return transmit_ethernet(next_hop_mac, net::EtherType::Ipv4,
-                                 packet, packet_length);
+        if (!transmit_ethernet(next_hop_mac, net::EtherType::Ipv4,
+                               packet, packet_length)) {
+            return false;
+        }
+        report_udp_tx();
+        return true;
     }
 
     for (uint16_t i = 0; i < packet_length; ++i) {

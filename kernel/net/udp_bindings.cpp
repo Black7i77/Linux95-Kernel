@@ -32,7 +32,7 @@ bool Table::unbind(uint16_t port)
     return false;
 }
 
-void Table::dispatch(const Ipv4Address& source, uint16_t source_port,
+bool Table::dispatch(const Ipv4Address& source, uint16_t source_port,
                      uint16_t destination_port, const uint8_t* payload,
                      uint16_t payload_length)
 {
@@ -40,9 +40,10 @@ void Table::dispatch(const Ipv4Address& source, uint16_t source_port,
         if (entry.in_use && entry.port == destination_port) {
             entry.callback(source, source_port, destination_port, payload,
                            payload_length, entry.context);
-            return;
+            return true;
         }
     }
+    return false;
 }
 
 } // namespace linux95::net::udp::bindings
