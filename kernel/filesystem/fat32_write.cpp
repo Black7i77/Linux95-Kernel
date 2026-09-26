@@ -238,6 +238,88 @@ void reclaim_if_unlinked(const helpers::BpbGeometry& g, uint32_t tail,
     (void)free_chain(fresh);
 }
 
+uint32_t first_cluster(const uint8_t entry[32])
+{
+    return (static_cast<uint32_t>(helpers::le16(entry + 20) & 0x0fffu) << 16) |
+           helpers::le16(entry + 26);
+}
+
+void set_first_cluster(uint8_t entry[32], uint32_t cluster)
+{
+    entry[20] = static_cast<uint8_t>(cluster >> 16);
+    entry[21] = static_cast<uint8_t>(cluster >> 24);
+    entry[26] = static_cast<uint8_t>(cluster);
+    entry[27] = static_cast<uint8_t>(cluster >> 8);
+}
+
+bool is_dot_entry(const uint8_t entry[32])
+{
+    if ((entry[11] & 0x10u) == 0) return false;
+    const bool one_dot = entry[0] == '.' && entry[1] == ' ';
+    const bool two_dots = entry[0] == '.' && entry[1] == '.';
+    if (!one_dot && !two_dots) return false;
+    for (uint32_t i = 2; i < 11; ++i)
+        if (entry[i] != ' ') return false;
+    return true;
+}
+
+Status directory_is_empty(const helpers::BpbGeometry& g, uint32_t first)
+{
+    if (!valid_cluster(g, first)) return Status::Corrupt;
+    uint32_t cluster = first;
+    bool past_end_marker = false;
+    for (uint32_t walked = 0; walked < g.cluster_count; ++walked) {
+        uint32_t next = 0;
+        bool end = false;
+        const Status step = chain_next(g, cluster, next, end, true);
+        if (step != Status::Ok) return step;
+        if (!past_end_marker) {
+            for (uint32_t sector_index = 0; sector_index < g.sectors_per_cluster;
+                 ++sector_index) {
+                uint32_t lba = 0;
+                if (!directory_lba(g, cluster, sector_index, lba)) return Status::Corrupt;
+                uint8_t sector[512];
+                if (!storage::read_sector(storage::DiskId::Test, lba, sector))
+                    return Status::IoError;
+                for (uint32_t offset = 0; offset < 512; offset += 32) {
+                    const uint8_t* entry = sector + offset;
+                    if (entry[0] == 0) { past_end_marker = true; break; }
+                    if (entry[0] != 0xe5 && !is_dot_entry(entry))
+                        return Status::DirectoryNotEmpty;
+                }
+                if (past_end_marker) break;
+            }
+        }
+        if (end) return Status::Ok;
+        cluster = next;
+    }
+    return Status::Corrupt;
+}
+
+Status validate_file_chain(const helpers::BpbGeometry& g,
+                           const uint8_t entry[32], uint32_t first)
+{
+    uint32_t cluster_bytes = 0;
+    if (!helpers::checked_mul_u32(g.sectors_per_cluster, 512u, cluster_bytes))
+        return Status::Corrupt;
+    uint32_t count = 0;
+    const Status size = file_cluster_count(helpers::le32(entry + 28),
+                                           cluster_bytes, count);
+    if (size != Status::Ok) return size;
+    if ((count == 0) != (first == 0) || count > g.cluster_count ||
+        (first != 0 && !valid_cluster(g, first))) return Status::Corrupt;
+    uint32_t cluster = first;
+    for (uint32_t walked = 0; walked < count; ++walked) {
+        uint32_t next = 0;
+        bool end = false;
+        const Status step = chain_next(g, cluster, next, end, true);
+        if (step != Status::Ok) return step;
+        if (end != (walked + 1 == count)) return Status::Corrupt;
+        cluster = next;
+    }
+    return Status::Ok;
+}
+
 } // namespace
 
 Status touch(const char* path)
@@ -253,6 +335,103 @@ Status touch(const char* path)
     char name[13];
     short_component(resolved.name, name);
     return create_directory_entry(resolved.parent_cluster, name, entry, slot);
+}
+
+Status mkdir(const char* path)
+{
+    ResolvedPath resolved = {};
+    Status status = resolve_path(path, resolved);
+    if (status != Status::Ok) return status;
+    if (resolved.exists) return Status::AlreadyExists;
+    helpers::BpbGeometry g = {};
+    status = geometry_for_write(g);
+    if (status != Status::Ok) return status;
+
+    uint32_t fresh = 0;
+    status = allocate_chain(1, fresh);
+    if (status != Status::Ok) return status;
+
+    uint8_t sector[512];
+    volatile uint8_t* clear = sector;
+    for (uint32_t i = 0; i < 512; ++i) clear[i] = 0;
+    for (uint32_t i = 0; i < g.sectors_per_cluster; ++i) {
+        uint32_t lba = 0;
+        if (!directory_lba(g, fresh, i, lba)) {
+            status = Status::Corrupt;
+            goto preparation_failure;
+        }
+        if (!storage::write_sector(storage::DiskId::Test, lba, sector)) {
+            status = Status::IoError;
+            goto preparation_failure;
+        }
+    }
+
+    for (uint32_t i = 0; i < 11; ++i) {
+        sector[i] = ' ';
+        sector[32 + i] = ' ';
+    }
+    sector[0] = '.';
+    sector[11] = 0x10;
+    set_first_cluster(sector, fresh);
+    sector[32] = '.';
+    sector[33] = '.';
+    sector[32 + 11] = 0x10;
+    set_first_cluster(sector + 32, resolved.parent_cluster == g.root_cluster
+                                          ? 0 : resolved.parent_cluster);
+    {
+        uint32_t lba = 0;
+        if (!directory_lba(g, fresh, 0, lba)) {
+            status = Status::Corrupt;
+            goto preparation_failure;
+        }
+        if (!storage::write_sector(storage::DiskId::Test, lba, sector)) {
+            status = Status::IoError;
+            goto preparation_failure;
+        }
+    }
+
+    {
+        uint8_t entry[32] = {};
+        entry[11] = 0x10;
+        set_first_cluster(entry, fresh);
+        char name[13];
+        short_component(resolved.name, name);
+        DirectorySlot slot = {};
+        status = create_directory_entry(resolved.parent_cluster, name, entry, slot);
+        if (status != Status::Ok) {
+            ResolvedPath observed = {};
+            if (resolve_path(path, observed) == Status::Ok && !observed.exists &&
+                free_chain(fresh) != Status::Ok) return Status::IoError;
+            return status;
+        }
+    }
+    return Status::Ok;
+
+preparation_failure:
+    return free_chain(fresh) == Status::Ok ? status : Status::IoError;
+}
+
+Status remove(const char* path)
+{
+    ResolvedPath resolved = {};
+    Status status = resolve_path(path, resolved);
+    if (status != Status::Ok) return status;
+    if (!resolved.exists) return Status::NotFound;
+    helpers::BpbGeometry g = {};
+    status = geometry_for_write(g);
+    if (status != Status::Ok) return status;
+
+    const uint32_t first = first_cluster(resolved.entry);
+    if ((resolved.entry[11] & 0x10u) != 0) {
+        status = directory_is_empty(g, first);
+    } else {
+        status = validate_file_chain(g, resolved.entry, first);
+    }
+    if (status != Status::Ok) return status;
+    status = delete_directory_entry(resolved.slot);
+    if (status != Status::Ok) return status;
+    return first == 0 || free_chain(first) == Status::Ok
+        ? Status::Ok : Status::IoError;
 }
 
 Status write_file(const char* path, const uint8_t* data, size_t size)

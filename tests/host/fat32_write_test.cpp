@@ -140,6 +140,137 @@ bool write_sector(DiskId disk, uint32_t lba, const uint8_t* in) {
 const ata::DeviceInfo& info(DiskId) { return device; }
 } // namespace linux95::storage
 
+void test_directory_creation_and_removal() {
+    using namespace linux95::filesystem;
+    using namespace linux95::filesystem::fat32;
+
+    // The directory is published only after its cluster and dot entries exist.
+    reset(); mounted();
+    memset(third_root, 0xa5, sizeof third_root);
+    assert(write::mkdir("/docs/new") == Status::Ok);
+    write::ResolvedPath path = {};
+    assert(write::resolve_path("DOCS/NEW", path) == Status::Ok && path.exists);
+    assert((path.entry[11] & 0x10u) != 0 && path.entry[26] == 6);
+    assert((get32(fat[0], 24) & 0x0fffffffu) == 0x0fffffffu);
+    assert((get32(fat[1], 24) & 0x0fffffffu) == 0x0fffffffu);
+    assert(memcmp(third_root, ".          ", 11) == 0);
+    assert(third_root[11] == 0x10 && third_root[26] == 6);
+    assert(memcmp(third_root + 32, "..         ", 11) == 0);
+    assert(third_root[32 + 11] == 0x10 && third_root[32 + 26] == 3);
+    assert(third_root[64] == 0 && third_root[511] == 0);
+    assert(write::mkdir("DOCS/NEW") == Status::AlreadyExists);
+    assert(write::mkdir("DOCS/FILE.TXT") == Status::AlreadyExists);
+    assert(write::mkdir("MISSING/NEW") == Status::NotFound);
+    assert(write::mkdir("DOCS/FILE.TXT/X") == Status::NotDirectory);
+    assert(write::mkdir("DOCS/BAD?.TXT") == Status::InvalidName);
+    assert(write::mkdir("DOCS/.") == Status::InvalidName);
+
+    reset(); mounted();
+    assert(write::mkdir("TOP") == Status::Ok);
+    assert(memcmp(third_root + 32, "..         ", 11) == 0);
+    assert(third_root[32 + 26] == 0 && third_root[32 + 27] == 0);
+    assert(third_root[32 + 20] == 0 && third_root[32 + 21] == 0);
+
+    // A full parent grows through the existing zero-before-link helper.
+    reset(); mounted(); fill_root();
+    memset(third_root, 0xa5, sizeof third_root);
+    assert(write::mkdir("FULL") == Status::Ok);
+    assert((get32(fat[0], 8) & 0x0fffffffu) == 7);
+    assert((get32(fat[1], 8) & 0x0fffffffu) == 7);
+    assert(memcmp(data_sectors[5], "FULL       ", 11) == 0);
+    assert(data_sectors[5][32] == 0);
+    assert(memcmp(third_root, ".          ", 11) == 0);
+    assert(third_root[26] == 6 && third_root[32 + 26] == 0);
+
+    // Files and empty directories are deleted before their chains are freed.
+    reset(); mounted(); seed_file_chain();
+    assert(write::remove("DOCS/FILE.TXT") == Status::Ok);
+    assert(second_root[0] == 0xe5);
+    assert((get32(fat[0], 16) & 0x0fffffffu) == 0);
+    assert((get32(fat[1], 20) & 0x0fffffffu) == 0);
+    assert(write::remove("DOCS/FILE.TXT") == Status::NotFound);
+
+    reset(); mounted();
+    assert(write::mkdir("DOCS/EMPTY") == Status::Ok);
+    assert(write::remove("DOCS/EMPTY") == Status::Ok);
+    assert((get32(fat[0], 24) & 0x0fffffffu) == 0);
+    assert((get32(fat[1], 24) & 0x0fffffffu) == 0);
+    assert(write::resolve_path("DOCS/EMPTY", path) == Status::Ok && !path.exists);
+
+    reset(); mounted();
+    assert(write::mkdir("DOCS/CHILD") == Status::Ok);
+    assert(write::touch("DOCS/CHILD/LEAF.TXT") == Status::Ok);
+    const uint32_t before_nonempty = write_attempt_count();
+    assert(write::remove("DOCS/CHILD") == Status::DirectoryNotEmpty);
+    assert(write_attempt_count() == before_nonempty);
+    assert(write::resolve_path("DOCS/CHILD", path) == Status::Ok && path.exists);
+    assert(write::remove("/") == Status::InvalidName);
+    assert(write::remove("DOCS/.") == Status::InvalidName);
+    assert(write::remove("DOCS/..") == Status::InvalidName);
+    assert(write::remove("DOCS/BAD?") == Status::InvalidName);
+    assert(write::remove("MISSING/X") == Status::NotFound);
+
+    // Only live dot entries may be ignored when deciding whether to remove.
+    reset(); mounted();
+    assert(write::mkdir("DOCS/EMPTY") == Status::Ok);
+    third_root[64] = 0xe5;
+    assert(write::remove("DOCS/EMPTY") == Status::Ok);
+    reset(); mounted();
+    assert(write::mkdir("DOCS/EMPTY") == Status::Ok);
+    third_root[64] = 'A'; third_root[64 + 11] = 0x0f;
+    third_root[96] = 0;
+    assert(write::remove("DOCS/EMPTY") == Status::DirectoryNotEmpty);
+
+    // The second FAT copy, every clear, dot initialization, and publication
+    // are required writes; none may leave a visible incomplete directory.
+    reset(); mounted(); fail_write_on(2, 1042);
+    assert(write::mkdir("DOCS/NEW") == Status::IoError);
+    assert(write::resolve_path("DOCS/NEW", path) == Status::Ok && !path.exists);
+    assert((get32(fat[0], 24) & 0x0fffffffu) == 0);
+
+    reset(); mounted(); fail_write_on(3, 2056);
+    assert(write::mkdir("DOCS/NEW") == Status::IoError);
+    assert(write::resolve_path("DOCS/NEW", path) == Status::Ok && !path.exists);
+    assert((get32(fat[0], 24) & 0x0fffffffu) == 0);
+
+    reset(); boot[13] = 2; put32(boot, 32, 140000);
+    device.lba28_sector_count = 140000; mounted();
+    fail_write_on(4, 2061);
+    assert(write::mkdir("DOCS/NEW") == Status::IoError);
+    assert(write::resolve_path("DOCS/NEW", path) == Status::Ok && !path.exists);
+    assert((get32(fat[0], 24) & 0x0fffffffu) == 0);
+
+    reset(); mounted(); fail_write_on(4, 2056);
+    assert(write::mkdir("DOCS/NEW") == Status::IoError);
+    assert(write::resolve_path("DOCS/NEW", path) == Status::Ok && !path.exists);
+    assert((get32(fat[0], 24) & 0x0fffffffu) == 0);
+
+    reset(); mounted(); fail_write_on(5, 2053);
+    assert(write::mkdir("DOCS/NEW") == Status::IoError);
+    assert(write::resolve_path("DOCS/NEW", path) == Status::Ok && !path.exists);
+    assert((get32(fat[0], 24) & 0x0fffffffu) == 0);
+
+    reset(); mounted(); fail_write_on(3, 2056); fail_write_on(4, 32);
+    assert(write::mkdir("DOCS/NEW") == Status::IoError);
+    assert(write::resolve_path("DOCS/NEW", path) == Status::Ok && !path.exists);
+
+    reset(); mounted(); seed_file_chain(); fail_write_on(1, 2053);
+    assert(write::remove("DOCS/FILE.TXT") == Status::IoError);
+    assert(second_root[0] == 'F' && (get32(fat[0], 16) & 0x0fffffffu) == 5);
+    check_old_file();
+
+    reset(); mounted(); seed_file_chain(); fail_write_on(3, 1042);
+    assert(write::remove("DOCS/FILE.TXT") == Status::IoError);
+    assert(second_root[0] == 0xe5);
+    assert((get32(fat[0], 16) & 0x0fffffffu) == 5);
+    assert((get32(fat[1], 16) & 0x0fffffffu) == 5);
+
+    reset(0x0081); mounted();
+    assert(write::mkdir("DOCS/NEW") == Status::Unsupported);
+    assert(write::remove("DOCS/FILE.TXT") == Status::Unsupported);
+    assert(write_attempt_count() == 0);
+}
+
 int main() {
     using namespace linux95;
     using namespace filesystem;
@@ -635,5 +766,6 @@ int main() {
     assert(second_root[26] == 6 && get32(second_root, 28) == 17);
     assert((get32(fat[0], 24) & 0x0fffffffu) == 0x0fffffffu);
 
+    test_directory_creation_and_removal();
     puts("fat32 write tests: PASS");
 }
