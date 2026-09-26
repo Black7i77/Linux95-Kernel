@@ -104,7 +104,7 @@ KERNEL_OBJS := \
 NETWORK_TEST_OBJS := $(subst $(BUILD)/kernel.o,$(BUILD)/kernel-network-test.o,$(KERNEL_OBJS))
 NETWORK_TEST_IMAGE := $(BUILD)/linux95-kernel-network-test.img
 
-.PHONY: all clean run run-debug test test-qemu prepare-storage-test-image test-host-segments test-host-process test-host-scheduler test-host-user-space test-host-elf test-host-elf-loader-plan test-host-syscall test-host-memory test-host-storage test-host-filesystem test-host-graphics test-host-pci test-host-rtl8139-helpers test-host-kernel-virtual-to-physical test-host-ethernet test-host-arp test-host-ipv4 test-host-icmp test-host-udp test-host-heap test-memory-source test-storage-source test-relocations check-tools
+.PHONY: all clean run run-debug test test-qemu prepare-storage-test-image test-host-segments test-host-process test-host-scheduler test-host-user-space test-host-elf test-host-elf-loader-plan test-host-syscall test-host-memory test-host-storage test-host-filesystem test-host-graphics test-host-pci test-host-rtl8139-helpers test-host-kernel-virtual-to-physical test-host-ethernet test-host-arp test-host-ipv4 test-host-icmp test-host-udp test-host-udp-bindings test-host-heap test-memory-source test-storage-source test-relocations check-tools
 
 all: check-tools $(BUILD)/linux95-kernel.img $(BUILD)/user/init.elf $(BUILD)/user/worker.elf
 
@@ -429,6 +429,12 @@ $(BUILD)/host-udp-test: tests/host/udp_test.cpp kernel/net/udp.cpp kernel/net/ud
 test-host-udp: $(BUILD)/host-udp-test
 >$(BUILD)/host-udp-test
 
+$(BUILD)/host-udp-bindings-test: tests/host/udp_bindings_test.cpp kernel/net/udp_bindings.cpp kernel/net/udp_bindings.hpp kernel/net/net_types.hpp | $(BUILD)
+>$(CXX) $(HOST_CXXFLAGS) tests/host/udp_bindings_test.cpp kernel/net/udp_bindings.cpp -o $@
+
+test-host-udp-bindings: $(BUILD)/host-udp-bindings-test
+>$(BUILD)/host-udp-bindings-test
+
 $(BUILD)/host-ata-helpers-test: tests/host/ata_helpers_test.cpp | $(BUILD)
 >$(CXX) $(HOST_CXXFLAGS) $< -o $@
 
@@ -601,7 +607,7 @@ test-preemption-source:
 >$(PYTHON) tests/preemption_source_checks.py
 
 test: test-preemption-source
-test: all test-host-memory test-host-storage test-host-heap test-host-segments test-host-process test-host-scheduler test-host-user-space test-host-elf test-host-elf-loader-plan test-host-syscall test-host-filesystem test-host-graphics test-host-pci test-host-rtl8139-helpers test-host-kernel-virtual-to-physical test-host-ethernet test-host-arp test-host-ipv4 test-host-icmp
+test: all test-host-memory test-host-storage test-host-heap test-host-segments test-host-process test-host-scheduler test-host-user-space test-host-elf test-host-elf-loader-plan test-host-syscall test-host-filesystem test-host-graphics test-host-pci test-host-rtl8139-helpers test-host-kernel-virtual-to-physical test-host-ethernet test-host-arp test-host-ipv4 test-host-icmp test-host-udp test-host-udp-bindings
 >$(PYTHON) tests/source_checks.py
 >$(PYTHON) tests/image_checks.py
 >$(PYTHON) tests/memory_source_checks.py
