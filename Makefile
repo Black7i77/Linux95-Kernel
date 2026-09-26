@@ -108,7 +108,7 @@ NETWORK_TEST_IMAGE := $(BUILD)/linux95-kernel-network-test.img
 UDP_NETWORK_TEST_OBJS := $(subst $(BUILD)/kernel.o,$(BUILD)/kernel-udp-network-test.o,$(KERNEL_OBJS))
 UDP_NETWORK_TEST_IMAGE := $(BUILD)/linux95-udp-network-test.img
 
-.PHONY: all clean run run-debug test test-qemu prepare-storage-test-image test-host-segments test-host-process test-host-scheduler test-host-user-space test-host-elf test-host-elf-loader-plan test-host-syscall test-host-memory test-host-storage test-host-filesystem test-host-graphics test-host-pci test-host-rtl8139-helpers test-host-kernel-virtual-to-physical test-host-ethernet test-host-arp test-host-ipv4 test-host-icmp test-host-udp test-host-udp-bindings test-host-network-udp test-host-heap test-memory-source test-storage-source test-relocations check-tools
+.PHONY: all clean run run-debug test test-qemu prepare-storage-test-image test-host-segments test-host-process test-host-scheduler test-host-user-space test-host-elf test-host-elf-loader-plan test-host-syscall test-host-memory test-host-storage test-host-filesystem test-host-graphics test-host-pci test-host-rtl8139-helpers test-host-kernel-virtual-to-physical test-host-ethernet test-host-arp test-host-ipv4 test-host-icmp test-host-udp test-host-udp-bindings test-host-network-udp test-host-dns-message test-host-heap test-memory-source test-storage-source test-relocations check-tools
 
 all: check-tools $(BUILD)/linux95-kernel.img $(BUILD)/user/init.elf $(BUILD)/user/worker.elf
 
@@ -461,6 +461,12 @@ $(BUILD)/host-network-udp-test: tests/host/network_udp_test.cpp kernel/net/netwo
 test-host-network-udp: $(BUILD)/host-network-udp-test
 >$(BUILD)/host-network-udp-test
 
+$(BUILD)/host-dns-message-test: tests/host/dns_message_test.cpp kernel/net/dns.cpp kernel/net/dns.hpp | $(BUILD)
+>$(CXX) $(HOST_CXXFLAGS) tests/host/dns_message_test.cpp kernel/net/dns.cpp -o $@
+
+test-host-dns-message: $(BUILD)/host-dns-message-test
+>$(BUILD)/host-dns-message-test
+
 $(BUILD)/host-ata-helpers-test: tests/host/ata_helpers_test.cpp | $(BUILD)
 >$(CXX) $(HOST_CXXFLAGS) $< -o $@
 
@@ -653,7 +659,7 @@ test-preemption-source:
 >$(PYTHON) tests/preemption_source_checks.py
 
 test: test-preemption-source
-test: all test-host-memory test-host-storage test-host-heap test-host-segments test-host-process test-host-scheduler test-host-user-space test-host-elf test-host-elf-loader-plan test-host-syscall test-host-filesystem test-host-graphics test-host-pci test-host-rtl8139-helpers test-host-kernel-virtual-to-physical test-host-ethernet test-host-arp test-host-ipv4 test-host-icmp test-host-udp test-host-udp-bindings test-host-network-udp
+test: all test-host-memory test-host-storage test-host-heap test-host-segments test-host-process test-host-scheduler test-host-user-space test-host-elf test-host-elf-loader-plan test-host-syscall test-host-filesystem test-host-graphics test-host-pci test-host-rtl8139-helpers test-host-kernel-virtual-to-physical test-host-ethernet test-host-arp test-host-ipv4 test-host-icmp test-host-udp test-host-udp-bindings test-host-network-udp test-host-dns-message
 >$(PYTHON) tests/qemu_smoke_policy_test.py
 >$(PYTHON) tests/source_checks.py
 >$(PYTHON) tests/image_checks.py
