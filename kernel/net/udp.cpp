@@ -5,8 +5,6 @@
 namespace linux95::net::udp {
 namespace {
 
-constexpr uint16_t kHeaderLength = 8;
-constexpr uint16_t kMaximumPayloadLength = 1472;
 constexpr uint16_t kLengthOffset = 4;
 constexpr uint16_t kChecksumOffset = 6;
 constexpr uint8_t kProtocol = 17;
@@ -79,7 +77,7 @@ bool build(
         static_cast<uint32_t>(kHeaderLength) + payload_length;
     if (datagram == nullptr ||
         (payload == nullptr && payload_length != 0) ||
-        payload_length > kMaximumPayloadLength ||
+        payload_length > kMaxPayloadLength ||
         required > capacity) {
         return false;
     }
@@ -103,10 +101,10 @@ bool build(
 }
 
 bool parse(
-    const Ipv4Address& source,
-    const Ipv4Address& destination,
     const uint8_t* datagram,
     uint16_t enclosing_length,
+    const Ipv4Address& source,
+    const Ipv4Address& destination,
     DatagramView& out)
 {
     if (datagram == nullptr || enclosing_length < kHeaderLength) {

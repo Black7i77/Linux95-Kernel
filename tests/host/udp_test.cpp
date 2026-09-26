@@ -8,6 +8,9 @@ namespace {
 
 using linux95::net::Ipv4Address;
 
+static_assert(linux95::net::udp::kHeaderLength == 8);
+static_assert(linux95::net::udp::kMaxPayloadLength == 1472);
+
 constexpr Ipv4Address kSource{{192, 0, 2, 1}};
 constexpr Ipv4Address kDestination{{198, 51, 100, 2}};
 
@@ -32,21 +35,23 @@ void test_build()
     assert(linux95::net::udp::checksum(
         kSource, kDestination, datagram, length) == 0);
 
-    uint8_t empty[8]{};
+    uint8_t empty[linux95::net::udp::kHeaderLength]{};
     assert(linux95::net::udp::build(
         empty, sizeof(empty), kSource, kDestination,
         1, 2, nullptr, 0, length));
     assert(length == 8 && empty[4] == 0 && empty[5] == 8);
 
-    uint8_t maximum[1480]{};
-    uint8_t maximum_payload[1472]{};
+    uint8_t maximum[linux95::net::udp::kHeaderLength +
+                    linux95::net::udp::kMaxPayloadLength]{};
+    uint8_t maximum_payload[linux95::net::udp::kMaxPayloadLength]{};
     assert(linux95::net::udp::build(
         maximum, sizeof(maximum), kSource, kDestination,
         1, 2, maximum_payload, sizeof(maximum_payload), length));
     assert(length == 1480);
     assert(!linux95::net::udp::build(
         maximum, sizeof(maximum), kSource, kDestination,
-        1, 2, maximum_payload, 1473, length));
+        1, 2, maximum_payload,
+        linux95::net::udp::kMaxPayloadLength + 1, length));
     assert(!linux95::net::udp::build(
         maximum, sizeof(maximum), kSource, kDestination,
         1, 2, nullptr, 1, length));
@@ -66,21 +71,22 @@ void test_parse()
         1000, 2000, payload, sizeof(payload), length));
     linux95::net::udp::DatagramView view{};
     assert(linux95::net::udp::parse(
-        kSource, kDestination, datagram, length + 2, view));
+        datagram, length + 2, kSource, kDestination, view));
     assert(view.source_port == 1000 && view.destination_port == 2000);
     assert(view.payload_length == 3 && view.payload[2] == 3);
     assert(!linux95::net::udp::parse(
-        kSource, kDestination, nullptr, length, view));
+        nullptr, length, kSource, kDestination, view));
     assert(!linux95::net::udp::parse(
-        kSource, kDestination, datagram, 7, view));
+        datagram, linux95::net::udp::kHeaderLength - 1,
+        kSource, kDestination, view));
     datagram[4] = 0;
     datagram[5] = 7;
     assert(!linux95::net::udp::parse(
-        kSource, kDestination, datagram, length, view));
+        datagram, length, kSource, kDestination, view));
     datagram[4] = 0;
     datagram[5] = 17;
     assert(!linux95::net::udp::parse(
-        kSource, kDestination, datagram, length, view));
+        datagram, length, kSource, kDestination, view));
     passed("udp_parse");
 }
 
@@ -135,17 +141,17 @@ void test_parse_checksum_policy()
         10, 20, payload, sizeof(payload), length));
     linux95::net::udp::DatagramView view{};
     assert(linux95::net::udp::parse(
-        kSource, kDestination, datagram, length, view));
+        datagram, length, kSource, kDestination, view));
     datagram[6] = 0;
     datagram[7] = 0;
     assert(linux95::net::udp::parse(
-        kSource, kDestination, datagram, length, view));
+        datagram, length, kSource, kDestination, view));
     passed("udp_zero_checksum_ipv4");
 
     datagram[6] = 0x12;
     datagram[7] = 0x34;
     assert(!linux95::net::udp::parse(
-        kSource, kDestination, datagram, length, view));
+        datagram, length, kSource, kDestination, view));
     passed("udp_bad_checksum_rejected");
 }
 
