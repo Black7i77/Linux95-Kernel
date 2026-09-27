@@ -296,6 +296,21 @@ Status directory_is_empty(const helpers::BpbGeometry& g, uint32_t first)
     return Status::Corrupt;
 }
 
+Status validate_directory_chain(const helpers::BpbGeometry& g, uint32_t first)
+{
+    if (!valid_cluster(g, first)) return Status::Corrupt;
+    uint32_t cluster = first;
+    for (uint32_t walked = 0; walked < g.cluster_count; ++walked) {
+        uint32_t next = 0;
+        bool end = false;
+        const Status status = chain_next(g, cluster, next, end, true);
+        if (status != Status::Ok) return status;
+        if (end) return Status::Ok;
+        cluster = next;
+    }
+    return Status::Corrupt;
+}
+
 Status validate_file_chain(const helpers::BpbGeometry& g,
                            const uint8_t entry[32], uint32_t first)
 {
@@ -397,10 +412,13 @@ Status mkdir(const char* path)
         char name[13];
         short_component(resolved.name, name);
         DirectorySlot slot = {};
-        status = create_directory_entry(resolved.parent_cluster, name, entry, slot);
+        bool definitely_unpublished = false;
+        status = create_directory_entry(resolved.parent_cluster, name, entry, slot,
+                                        &definitely_unpublished);
         if (status != Status::Ok) {
             ResolvedPath observed = {};
-            if (resolve_path(path, observed) == Status::Ok && !observed.exists &&
+            if (definitely_unpublished &&
+                resolve_path(path, observed) == Status::Ok && !observed.exists &&
                 free_chain(fresh) != Status::Ok) return Status::IoError;
             return status;
         }
@@ -539,10 +557,14 @@ Status write_file(const char* path, const uint8_t* data, size_t size)
         char name[13];
         short_component(resolved.name, name);
         DirectorySlot slot = {};
-        status = create_directory_entry(resolved.parent_cluster, name, entry, slot);
+        bool definitely_unpublished = false;
+        status = create_directory_entry(resolved.parent_cluster, name, entry, slot,
+                                        &definitely_unpublished);
         if (status != Status::Ok) {
             ResolvedPath observed = {};
-            if (resolve_path(path, observed) == Status::Ok && !observed.exists &&
+            if (definitely_unpublished &&
+                resolve_path(path, observed) == Status::Ok && !observed.exists &&
+                fresh != 0 &&
                 free_chain(fresh) != Status::Ok) return Status::IoError;
             return status;
         }
@@ -682,7 +704,8 @@ Status move(const char* source, const char* destination)
 
     const uint32_t first = first_cluster(from.entry);
     if (directory) {
-        if (!valid_cluster(g, first)) return Status::Corrupt;
+        status = validate_directory_chain(g, first);
+        if (status != Status::Ok) return status;
     } else {
         status = validate_file_chain(g, from.entry, first);
         if (status != Status::Ok) return status;

@@ -23,6 +23,7 @@ struct WriteFailure { uint32_t ordinal; uint32_t lba; };
 WriteFailure write_failures[2] = {};
 uint32_t write_failure_count = 0;
 bool partial_copy_publication = false;
+uint32_t partial_new_publication_attempt = 0;
 bool partial_move_publication = false;
 bool partial_move_source_delete = false;
 linux95::storage::ata::DeviceInfo device = {true, true, 131072, {}};
@@ -73,6 +74,7 @@ void reset(uint16_t flags = 0) {
     fail_lba = 0xffffffffu; fail_read_lba = 0xffffffffu;
     write_failure_count = 0;
     partial_copy_publication = false;
+    partial_new_publication_attempt = 0;
     partial_move_publication = false;
     partial_move_source_delete = false;
 }
@@ -135,6 +137,12 @@ bool write_sector(DiskId disk, uint32_t lba, const uint8_t* in) {
     if (disk != DiskId::Test || in == nullptr) return false;
     ++write_attempts;
     if (partial_copy_publication && write_attempts == 9 && lba == 2053) {
+        memcpy(second_root + 32, in + 32, 32);
+        memcpy(second_root + 32, "ORPHAN  TXT", 11);
+        return false;
+    }
+    if (partial_new_publication_attempt != 0 &&
+        write_attempts == partial_new_publication_attempt && lba == 2053) {
         memcpy(second_root + 32, in + 32, 32);
         memcpy(second_root + 32, "ORPHAN  TXT", 11);
         return false;
@@ -289,6 +297,20 @@ void test_directory_creation_and_removal() {
     assert(write::mkdir("DOCS/NEW") == Status::Unsupported);
     assert(write::remove("DOCS/FILE.TXT") == Status::Unsupported);
     assert(write_attempt_count() == 0);
+}
+
+void test_mkdir_partial_publication_retains_chain() {
+    using namespace linux95::filesystem;
+    using namespace linux95::filesystem::fat32;
+    reset(); mounted();
+    partial_new_publication_attempt = 5;
+    assert(write::mkdir("DOCS/NEW") == Status::IoError);
+    write::ResolvedPath path = {};
+    assert(write::resolve_path("DOCS/NEW", path) == Status::Ok && !path.exists);
+    assert(write::resolve_path("DOCS/ORPHAN.TXT", path) == Status::Ok && path.exists);
+    assert((path.entry[11] & 0x10u) != 0 && path.entry[26] == 6);
+    assert((get32(fat[0], 24) & 0x0fffffffu) == 0x0fffffffu);
+    assert((get32(fat[1], 24) & 0x0fffffffu) == 0x0fffffffu);
 }
 
 void check_copy_absent_and_source_intact(const char* destination) {
@@ -657,7 +679,69 @@ void test_allocate_later_eoc_write_failure_clears_output() {
     assert(write_attempt_count() == 7 && writes == 6);
 }
 
-int main() {
+void test_directory_rename_rejects_corrupt_chain(uint32_t variant) {
+    using namespace linux95::filesystem;
+    using namespace linux95::filesystem::fat32;
+    reset(); mounted();
+    memcpy(second_root + 32, "SUB        ", 11);
+    second_root[32 + 11] = 0x10;
+    second_root[32 + 26] = 6;
+    second_root[64] = 0;
+    if (variant == 1) {
+        put32(fat[0], 24, 0x0ffffff7u);
+        put32(fat[1], 24, 0x0ffffff7u);
+    } else if (variant == 2) {
+        put32(fat[0], 24, 0x0fffffffu);
+        put32(fat[1], 24, 0x0ffffff7u);
+    } else if (variant == 3) {
+        put32(fat[0], 24, 7);
+        put32(fat[1], 24, 7);
+        put32(fat[0], 28, 0x0ffffff7u);
+        put32(fat[1], 28, 0x0ffffff7u);
+    }
+    uint8_t saved_parent[512], saved_fat[2][512];
+    memcpy(saved_parent, second_root, sizeof saved_parent);
+    memcpy(saved_fat, fat, sizeof saved_fat);
+    assert(write::move("DOCS/SUB", "DOCS/RENAMED") == Status::Corrupt);
+    assert(write_attempt_count() == 0);
+    assert(memcmp(second_root, saved_parent, sizeof saved_parent) == 0);
+    assert(memcmp(fat, saved_fat, sizeof saved_fat) == 0);
+}
+
+void test_new_file_partial_publication_retains_chain() {
+    using namespace linux95::filesystem;
+    using namespace linux95::filesystem::fat32;
+    reset(); mounted();
+    const uint8_t data[] = {'p', 'a', 'y', 'l', 'o', 'a', 'd'};
+    partial_new_publication_attempt = 4;
+    assert(write::write_file("DOCS/NEW.TXT", data, sizeof data) == Status::IoError);
+    write::ResolvedPath path = {};
+    assert(write::resolve_path("DOCS/NEW.TXT", path) == Status::Ok && !path.exists);
+    assert(write::resolve_path("DOCS/ORPHAN.TXT", path) == Status::Ok && path.exists);
+    assert((path.entry[11] & 0x10u) == 0 && path.entry[26] == 6);
+    assert(get32(path.entry, 28) == sizeof data);
+    assert((get32(fat[0], 24) & 0x0fffffffu) == 0x0fffffffu);
+    assert((get32(fat[1], 24) & 0x0fffffffu) == 0x0fffffffu);
+}
+
+int main(int argc, char** argv) {
+    if (argc == 2) {
+        if (strcmp(argv[1], "mkdir-partial") == 0)
+            test_mkdir_partial_publication_retains_chain();
+        else if (strcmp(argv[1], "write-partial") == 0)
+            test_new_file_partial_publication_retains_chain();
+        else if (strcmp(argv[1], "rename-free") == 0)
+            test_directory_rename_rejects_corrupt_chain(0);
+        else if (strcmp(argv[1], "rename-bad") == 0)
+            test_directory_rename_rejects_corrupt_chain(1);
+        else if (strcmp(argv[1], "rename-mirror") == 0)
+            test_directory_rename_rejects_corrupt_chain(2);
+        else if (strcmp(argv[1], "rename-later") == 0)
+            test_directory_rename_rejects_corrupt_chain(3);
+        else return 2;
+        return 0;
+    }
+    assert(argc == 1);
     test_free_chain_mirror_mismatch_preserves_chain();
     test_allocate_later_eoc_write_failure_clears_output();
     using namespace linux95;
@@ -1155,9 +1239,13 @@ int main() {
     assert((get32(fat[0], 24) & 0x0fffffffu) == 0x0fffffffu);
 
     test_directory_creation_and_removal();
+    test_mkdir_partial_publication_retains_chain();
+    test_new_file_partial_publication_retains_chain();
     test_file_copy();
     test_file_copy_failures();
     test_move_metadata_and_rejections();
+    for (uint32_t variant = 0; variant < 4; ++variant)
+        test_directory_rename_rejects_corrupt_chain(variant);
     test_move_failures();
     puts("fat32 write tests: PASS");
 }
