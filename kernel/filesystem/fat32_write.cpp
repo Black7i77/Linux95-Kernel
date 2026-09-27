@@ -555,6 +555,112 @@ unpublished_failure:
     return status;
 }
 
+Status copy_file(const char* source, const char* destination)
+{
+    ResolvedPath from = {};
+    Status status = resolve_path(source, from);
+    if (status != Status::Ok) return status;
+    if (!from.exists) return Status::NotFound;
+    if ((from.entry[11] & 0x10u) != 0) return Status::IsDirectory;
+
+    ResolvedPath to = {};
+    status = resolve_path(destination, to);
+    if (status != Status::Ok) return status;
+    if (to.exists) return Status::AlreadyExists;
+
+    helpers::BpbGeometry g = {};
+    status = geometry_for_write(g);
+    if (status != Status::Ok) return status;
+    uint32_t cluster_bytes = 0;
+    if (!helpers::checked_mul_u32(g.sectors_per_cluster, 512u, cluster_bytes))
+        return Status::Corrupt;
+    const uint32_t size = helpers::le32(from.entry + 28);
+    uint32_t clusters = 0;
+    status = file_cluster_count(size, cluster_bytes, clusters);
+    if (status != Status::Ok) return status;
+    if (clusters > g.cluster_count) return Status::Corrupt;
+    const uint32_t source_first = first_cluster(from.entry);
+    status = validate_file_chain(g, from.entry, source_first);
+    if (status != Status::Ok) return status;
+
+    uint32_t fresh = 0;
+    status = allocate_chain(clusters, fresh);
+    if (status != Status::Ok) return status;
+
+    uint32_t remaining = size;
+    uint32_t source_cluster = source_first;
+    uint32_t target_cluster = fresh;
+    for (uint32_t index = 0; index < clusters; ++index) {
+        for (uint32_t sector_index = 0;
+             sector_index < g.sectors_per_cluster && remaining != 0;
+             ++sector_index) {
+            uint32_t source_lba = 0, target_lba = 0;
+            if (!directory_lba(g, source_cluster, sector_index, source_lba) ||
+                !directory_lba(g, target_cluster, sector_index, target_lba)) {
+                status = Status::Corrupt;
+                goto unpublished_failure;
+            }
+            uint8_t sector[512];
+            if (!storage::read_sector(storage::DiskId::Test, source_lba, sector)) {
+                status = Status::IoError;
+                goto unpublished_failure;
+            }
+            const uint32_t take = remaining < 512u ? remaining : 512u;
+            volatile uint8_t* clear = sector;
+            for (uint32_t byte = take; byte < 512u; ++byte) clear[byte] = 0;
+            if (!storage::write_sector(storage::DiskId::Test, target_lba, sector)) {
+                status = Status::IoError;
+                goto unpublished_failure;
+            }
+            remaining -= take;
+        }
+        uint32_t source_next = 0, target_next = 0;
+        bool source_end = false, target_end = false;
+        status = chain_next(g, source_cluster, source_next, source_end, true);
+        if (status != Status::Ok) goto unpublished_failure;
+        status = chain_next(g, target_cluster, target_next, target_end, true);
+        if (status != Status::Ok) goto unpublished_failure;
+        if (source_end != (index + 1 == clusters) ||
+            target_end != (index + 1 == clusters)) {
+            status = Status::Corrupt;
+            goto unpublished_failure;
+        }
+        source_cluster = source_next;
+        target_cluster = target_next;
+    }
+    if (remaining != 0) {
+        status = Status::Corrupt;
+        goto unpublished_failure;
+    }
+
+    {
+        uint8_t entry[32] = {};
+        for (uint32_t i = 0; i < 11; ++i) entry[i] = to.name[i];
+        entry[11] = 0x20;
+        set_first_cluster(entry, fresh);
+        put32(entry, 28, size);
+        char name[13];
+        short_component(to.name, name);
+        DirectorySlot slot = {};
+        bool definitely_unpublished = false;
+        status = create_directory_entry(to.parent_cluster, name, entry, slot,
+                                        &definitely_unpublished);
+        if (status != Status::Ok) {
+            ResolvedPath observed = {};
+            if (definitely_unpublished &&
+                resolve_path(destination, observed) == Status::Ok &&
+                !observed.exists && fresh != 0 && free_chain(fresh) != Status::Ok)
+                return Status::IoError;
+            return status;
+        }
+    }
+    return Status::Ok;
+
+unpublished_failure:
+    if (fresh != 0 && free_chain(fresh) != Status::Ok) return Status::IoError;
+    return status;
+}
+
 Status resolve_path(const char* path, ResolvedPath& result)
 {
     result = {};
@@ -671,8 +777,10 @@ Status delete_directory_entry(const DirectorySlot& slot)
 }
 
 Status create_directory_entry(uint32_t directory_cluster, const char* name,
-                              const uint8_t entry[32], DirectorySlot& slot)
+                              const uint8_t entry[32], DirectorySlot& slot,
+                              bool* definitely_unpublished)
 {
+    if (definitely_unpublished != nullptr) *definitely_unpublished = true;
     uint8_t encoded[11];
     if (entry == nullptr || !encode_component(name, encoded)) return Status::InvalidName;
     helpers::BpbGeometry g = {};
@@ -758,11 +866,13 @@ Status create_directory_entry(uint32_t directory_cluster, const char* name,
     bool unchanged = false;
     const Status publish = put_directory_entry(g, vacant, published, &unchanged);
     if (publish != Status::Ok) {
+        if (definitely_unpublished != nullptr) *definitely_unpublished = unchanged;
         if (fresh != 0 && unchanged &&
             write_fat_entry(tail, 0x0fffffffu) == Status::Ok)
             (void)free_chain(fresh);
         return Status::IoError;
     }
+    if (definitely_unpublished != nullptr) *definitely_unpublished = false;
     slot = vacant;
     return Status::Ok;
 }

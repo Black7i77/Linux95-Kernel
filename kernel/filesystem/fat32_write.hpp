@@ -19,6 +19,7 @@ struct ResolvedPath {
 
 Status touch(const char* path);
 Status write_file(const char* path, const uint8_t* data, size_t size);
+Status copy_file(const char* source, const char* destination);
 Status mkdir(const char* path);
 Status remove(const char* path);
 
@@ -26,7 +27,8 @@ Status resolve_path(const char* path, ResolvedPath& result);
 Status find_directory_entry(uint32_t directory_cluster, const char* name,
                             DirectorySlot& slot, uint8_t entry[32]);
 Status create_directory_entry(uint32_t directory_cluster, const char* name,
-                              const uint8_t entry[32], DirectorySlot& slot);
+                              const uint8_t entry[32], DirectorySlot& slot,
+                              bool* definitely_unpublished = nullptr);
 Status read_directory_entry(const DirectorySlot& slot, uint8_t entry[32]);
 Status update_directory_entry(const DirectorySlot& slot, const uint8_t name[11],
                               uint32_t first_cluster, uint32_t size);

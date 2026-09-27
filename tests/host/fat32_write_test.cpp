@@ -22,6 +22,7 @@ uint32_t fail_read_lba = 0xffffffffu;
 struct WriteFailure { uint32_t ordinal; uint32_t lba; };
 WriteFailure write_failures[2] = {};
 uint32_t write_failure_count = 0;
+bool partial_copy_publication = false;
 linux95::storage::ata::DeviceInfo device = {true, true, 131072, {}};
 
 void fail_read_on(uint32_t lba) { fail_read_lba = lba; }
@@ -69,6 +70,7 @@ void reset(uint16_t flags = 0) {
     writes = 0; write_attempts = 0;
     fail_lba = 0xffffffffu; fail_read_lba = 0xffffffffu;
     write_failure_count = 0;
+    partial_copy_publication = false;
 }
 bool visit(const linux95::filesystem::Entry& e, void* p) {
     *static_cast<bool*>(p) = strcmp(e.name, "FILE.TXT") == 0;
@@ -128,6 +130,11 @@ bool read_sector(DiskId disk, uint32_t lba, uint8_t* out) {
 bool write_sector(DiskId disk, uint32_t lba, const uint8_t* in) {
     if (disk != DiskId::Test || in == nullptr) return false;
     ++write_attempts;
+    if (partial_copy_publication && write_attempts == 9 && lba == 2053) {
+        memcpy(second_root + 32, in + 32, 32);
+        memcpy(second_root + 32, "ORPHAN  TXT", 11);
+        return false;
+    }
     if (lba == fail_lba) return false;
     for (uint32_t i = 0; i < write_failure_count; ++i)
         if (write_attempts == write_failures[i].ordinal && lba == write_failures[i].lba)
@@ -269,6 +276,189 @@ void test_directory_creation_and_removal() {
     assert(write::mkdir("DOCS/NEW") == Status::Unsupported);
     assert(write::remove("DOCS/FILE.TXT") == Status::Unsupported);
     assert(write_attempt_count() == 0);
+}
+
+void check_copy_absent_and_source_intact(const char* destination) {
+    using namespace linux95::filesystem;
+    fat32::write::ResolvedPath path = {};
+    assert(fat32::write::resolve_path(destination, path) == Status::Ok);
+    assert(!path.exists);
+    assert(second_root[26] == 4 && get32(second_root, 28) == 1024);
+    assert((get32(fat[0], 16) & 0x0fffffffu) == 5);
+    assert((get32(fat[1], 16) & 0x0fffffffu) == 5);
+    assert((get32(fat[0], 20) & 0x0fffffffu) == 0x0fffffffu);
+    assert((get32(fat[1], 20) & 0x0fffffffu) == 0x0fffffffu);
+    check_old_file();
+}
+
+void test_file_copy() {
+    using namespace linux95::filesystem;
+    using namespace linux95::filesystem::fat32;
+
+    // Each literal length catches a different last-sector/last-cluster case.
+    const size_t lengths[] = {0, 1, 511, 512, 513, 1024, 1025, 1536};
+    for (size_t length : lengths) {
+        reset(); mounted();
+        uint8_t expected[1536] = {};
+        for (size_t i = 0; i < sizeof expected; ++i)
+            expected[i] = static_cast<uint8_t>((i * 73u + 19u) & 0xffu);
+        const uint32_t source_clusters = static_cast<uint32_t>(length / 512 +
+            (length % 512 != 0));
+        put32(second_root, 28, static_cast<uint32_t>(length));
+        second_root[26] = source_clusters == 0 ? 0 : 4;
+        for (uint32_t cluster = 4; cluster < 7; ++cluster) {
+            const uint32_t link = cluster < 4 + source_clusters - 1
+                ? cluster + 1 : cluster == 4 + source_clusters - 1
+                    ? 0x0fffffffu : 0;
+            for (uint32_t copy = 0; copy < 2; ++copy)
+                put32(fat[copy], cluster * 4, link);
+        }
+        memcpy(file_a, expected, 512);
+        memcpy(file_b, expected + 512, 512);
+        memcpy(third_root, expected + 1024, 512);
+        uint8_t source_entry[32], source_data[3][512];
+        memcpy(source_entry, second_root, 32);
+        memcpy(source_data[0], file_a, 512);
+        memcpy(source_data[1], file_b, 512);
+        memcpy(source_data[2], third_root, 512);
+
+        assert(write::copy_file("DOCS/FILE.TXT", "DOCS/COPY.TXT") == Status::Ok);
+        check_file("DOCS/COPY.TXT", expected, length);
+        check_file("DOCS/FILE.TXT", expected, length);
+        assert(memcmp(source_entry, second_root, 32) == 0);
+        for (uint32_t i = 0; i < source_clusters; ++i)
+            assert(memcmp(source_data[i], data_sectors[2 + i], 512) == 0);
+        assert(get32(second_root + 32, 28) == length);
+        assert(second_root[32 + 26] == (length == 0 ? 0 : 4 + source_clusters));
+        const uint32_t destination_clusters = source_clusters;
+        for (uint32_t i = 0; i < destination_clusters; ++i) {
+            const uint32_t cluster = 4 + source_clusters + i;
+            const uint32_t link = i + 1 == destination_clusters
+                ? 0x0fffffffu : cluster + 1;
+            assert((get32(fat[0], cluster * 4) & 0x0fffffffu) == link);
+            assert((get32(fat[1], cluster * 4) & 0x0fffffffu) == link);
+        }
+    }
+
+    reset(); mounted(); seed_file_chain();
+    assert(write::mkdir("DOCS/SUB") == Status::Ok);
+    assert(write::copy_file("/docs/file.txt", "DOCS/SUB/COPY.TXT") == Status::Ok);
+    uint8_t expected[1024];
+    memset(expected, 'A', 512); memset(expected + 512, 'B', 512);
+    check_file("DOCS/SUB/COPY.TXT", expected, sizeof expected);
+    check_old_file();
+
+    reset(); mounted(); seed_file_chain();
+    const uint32_t before = write_attempt_count();
+    assert(write::copy_file("DOCS", "DOCS/NEW.TXT") == Status::IsDirectory);
+    assert(write::copy_file("DOCS/FILE.TXT", "DOCS/FILE.TXT") == Status::AlreadyExists);
+    assert(write::copy_file("DOCS/FILE.TXT", "DOCS") == Status::AlreadyExists);
+    assert(write::copy_file("DOCS/FILE.TXT", "MISSING/NEW.TXT") == Status::NotFound);
+    assert(write::copy_file("MISSING.TXT", "DOCS/NEW.TXT") == Status::NotFound);
+    assert(write::copy_file("DOCS/FILE.TXT", "DOCS/BAD?.TXT") == Status::InvalidName);
+    assert(write_attempt_count() == before);
+    check_old_file();
+
+    // Inconsistent size, malformed links, and a huge size need no allocation.
+    struct BadSource { uint32_t first, size, link4, link5; };
+    const BadSource bad[] = {
+        {0, 1024, 5, 0x0fffffffu},
+        {4, 0, 5, 0x0fffffffu},
+        {4, 1024, 0x0ffffff7u, 0x0fffffffu},
+        {4, 1024, 0x0fffffffu, 0x0fffffffu},
+        {4, 1024, 5, 4},
+        {4, 512, 5, 0x0fffffffu},
+        {4, 0xffffffffu, 5, 0x0fffffffu},
+    };
+    for (const BadSource& invalid : bad) {
+        reset(); mounted(); seed_file_chain();
+        second_root[26] = static_cast<uint8_t>(invalid.first);
+        put32(second_root, 28, invalid.size);
+        for (uint32_t copy = 0; copy < 2; ++copy) {
+            put32(fat[copy], 16, invalid.link4);
+            put32(fat[copy], 20, invalid.link5);
+        }
+        uint8_t saved_entry[32], saved_fat[2][512];
+        memcpy(saved_entry, second_root, 32); memcpy(saved_fat, fat, sizeof fat);
+        assert(write::copy_file("DOCS/FILE.TXT", "DOCS/COPY.TXT") == Status::Corrupt);
+        assert(write_attempt_count() == 0);
+        assert(memcmp(saved_entry, second_root, 32) == 0);
+        assert(memcmp(saved_fat, fat, sizeof fat) == 0);
+        write::ResolvedPath path = {};
+        assert(write::resolve_path("DOCS/COPY.TXT", path) == Status::Ok && !path.exists);
+    }
+    reset(); mounted(); seed_file_chain();
+    put32(fat[1], 16, 0x0ffffff7u);
+    assert(write::copy_file("DOCS/FILE.TXT", "DOCS/COPY.TXT") == Status::Corrupt);
+    assert(write_attempt_count() == 0);
+}
+
+void test_file_copy_failures() {
+    using namespace linux95::filesystem;
+    using namespace linux95::filesystem::fat32;
+
+    reset(); mounted(); seed_file_chain();
+    fail_read_on(2054); // second source sector, after first destination write
+    assert(write::copy_file("DOCS/FILE.TXT", "DOCS/COPY.TXT") == Status::IoError);
+    fail_read_on(0xffffffffu);
+    check_copy_absent_and_source_intact("DOCS/COPY.TXT");
+
+    reset(); mounted(); seed_file_chain();
+    for (uint32_t cluster = 6; cluster < 128; ++cluster)
+        for (uint32_t copy = 0; copy < 2; ++copy)
+            put32(fat[copy], cluster * 4, 0x0fffffffu);
+    assert(write::copy_file("DOCS/FILE.TXT", "DOCS/COPY.TXT") == Status::NoSpace);
+    assert(write_attempt_count() == 0);
+    check_copy_absent_and_source_intact("DOCS/COPY.TXT");
+
+    const struct Failure { uint32_t ordinal, lba; } failures[] = {
+        {1, 32}, {2, 1042}, {5, 32}, {6, 1042},
+        {7, 2056}, {8, 2057}, {9, 2053},
+    };
+    for (const Failure& failure : failures) {
+        reset(); mounted(); seed_file_chain();
+        fail_write_on(failure.ordinal, failure.lba);
+        assert(write::copy_file("DOCS/FILE.TXT", "DOCS/COPY.TXT") == Status::IoError);
+        assert(write_attempt_count() >= failure.ordinal);
+        check_copy_absent_and_source_intact("DOCS/COPY.TXT");
+    }
+
+    reset(); mounted(); seed_file_chain();
+    fail_write_on(7, 2056); // data write then cleanup FAT write
+    fail_write_on(8, 32);
+    assert(write::copy_file("DOCS/FILE.TXT", "DOCS/COPY.TXT") == Status::IoError);
+    check_copy_absent_and_source_intact("DOCS/COPY.TXT");
+
+    // Fill DOCS so entry creation must extend its directory chain.
+    for (uint32_t failure_stage = 0; failure_stage < 2; ++failure_stage) {
+        reset(); mounted(); seed_file_chain();
+        for (uint32_t slot = 1; slot < 16; ++slot) {
+            memset(second_root + slot * 32, ' ', 11);
+            second_root[slot * 32] = 'Q';
+            second_root[slot * 32 + 1] = 'A' + static_cast<uint8_t>(slot);
+            second_root[slot * 32 + 11] = 0x20;
+        }
+        if (failure_stage == 0) fail_write_on(11, 2058); // growth clear
+        else fail_write_on(16, 2058); // grown slot publication
+        assert(write::copy_file("DOCS/FILE.TXT", "DOCS/COPY.TXT") == Status::IoError);
+        assert(write_attempt_count() >= (failure_stage == 0 ? 11u : 16u));
+        check_copy_absent_and_source_intact("DOCS/COPY.TXT");
+    }
+
+    // A failed write can still expose a live entry with an unexpected name.
+    // The requested name is absent, but its chain must not be reclaimed.
+    reset(); mounted(); seed_file_chain();
+    partial_copy_publication = true;
+    assert(write::copy_file("DOCS/FILE.TXT", "DOCS/COPY.TXT") == Status::IoError);
+    check_copy_absent_and_source_intact("DOCS/COPY.TXT");
+    write::DirectorySlot orphan_slot = {};
+    uint8_t orphan[32] = {};
+    assert(write::find_directory_entry(3, "ORPHAN.TXT", orphan_slot, orphan) == Status::Ok);
+    assert(orphan[26] == 6 && get32(orphan, 28) == 1024);
+    assert((get32(fat[0], 24) & 0x0fffffffu) == 7);
+    assert((get32(fat[1], 24) & 0x0fffffffu) == 7);
+    assert((get32(fat[0], 28) & 0x0fffffffu) == 0x0fffffffu);
+    assert((get32(fat[1], 28) & 0x0fffffffu) == 0x0fffffffu);
 }
 
 int main() {
@@ -767,5 +957,7 @@ int main() {
     assert((get32(fat[0], 24) & 0x0fffffffu) == 0x0fffffffu);
 
     test_directory_creation_and_removal();
+    test_file_copy();
+    test_file_copy_failures();
     puts("fat32 write tests: PASS");
 }
