@@ -1282,6 +1282,9 @@ void process_mouse_event(
     RuntimeState& state,
     const mouse::MouseEvent& event)
 {
+    const bool pointer_action_active =
+        state.pointer_window != 0;
+
     restore_cursor(state);
 
     gui::Point next{
@@ -1363,6 +1366,30 @@ void process_mouse_event(
 
     state.left_down =
         event.left;
+
+    if (!pointer_action_active) {
+        const gui::WindowId focused =
+            state.windows.focused();
+        const gui::Window* window =
+            state.windows.find(focused);
+        gui::AppInstance* app =
+            app_for(state, focused);
+
+        if (
+            window != nullptr &&
+            app != nullptr &&
+            window->state == gui::WindowState::Open) {
+            route_mouse(
+                state.windows,
+                focused,
+                *app,
+                content_rect(window->bounds),
+                state.mouse_position,
+                pressed,
+                released,
+                event.left);
+        }
+    }
 
 }
 
@@ -1593,6 +1620,41 @@ bool route_key(
     app->callbacks.on_key(
         app->context,
         event);
+
+    return true;
+}
+
+bool route_mouse(
+    const gui::WindowManager& windows,
+    gui::WindowId target,
+    gui::AppInstance& app,
+    gui::Rect content,
+    gui::Point screen_point,
+    bool left_pressed,
+    bool left_released,
+    bool left_down)
+{
+    const gui::Window* window =
+        windows.find(target);
+
+    if (
+        windows.focused() != target ||
+        window == nullptr ||
+        window->state != gui::WindowState::Open ||
+        !gui::contains(content, screen_point) ||
+        app.callbacks.on_mouse == nullptr) {
+        return false;
+    }
+
+    app.callbacks.on_mouse(
+        app.context,
+        gui::AppMouseEvent{
+            screen_point.x - content.x,
+            screen_point.y - content.y,
+            left_pressed,
+            left_released,
+            left_down,
+        });
 
     return true;
 }

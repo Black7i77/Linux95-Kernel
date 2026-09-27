@@ -70,6 +70,16 @@ bool route_key(
     gui::AppInstance& system_info,
     const keyboard::KeyEvent& event);
 
+bool route_mouse(
+    const gui::WindowManager& windows,
+    gui::WindowId target,
+    gui::AppInstance& app,
+    gui::Rect content,
+    gui::Point screen_point,
+    bool left_pressed,
+    bool left_released,
+    bool left_down);
+
 gui::Rect content_rect(
     gui::Rect bounds);
 

@@ -900,6 +900,16 @@ test-host-window-manager: $(BUILD)/host-window-manager-test
 
 test-host-graphics: test-host-window-manager
 
+.PHONY: test-host-desktop-mouse-routing
+
+$(BUILD)/host-desktop-mouse-routing-test: tests/host/desktop_mouse_routing_test.cpp kernel/gui/desktop.cpp kernel/gui/desktop.hpp kernel/gui/app.hpp kernel/gui/window_manager.cpp kernel/gui/window_manager.hpp kernel/gui/geometry.hpp | $(BUILD)
+>$(CXX) $(HOST_CXXFLAGS) -ffunction-sections -fdata-sections tests/host/desktop_mouse_routing_test.cpp kernel/gui/desktop.cpp kernel/gui/window_manager.cpp -Wl,--gc-sections -o $@
+
+test-host-desktop-mouse-routing: $(BUILD)/host-desktop-mouse-routing-test
+>$(BUILD)/host-desktop-mouse-routing-test
+
+test-host-graphics: test-host-desktop-mouse-routing
+
 .PHONY: test-host-terminal-model
 
 $(BUILD)/host-terminal-model-test: tests/host/terminal_model_test.cpp kernel/gui/terminal_model.hpp kernel/gui/terminal_model.cpp kernel/terminal/output.hpp | $(BUILD)
