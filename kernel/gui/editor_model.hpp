@@ -1,6 +1,7 @@
 #pragma once
 
 #include "filesystem/vfs.hpp"
+#include "arch/keyboard.hpp"
 
 #include <stddef.h>
 #include <stdint.h>
@@ -10,6 +11,12 @@ namespace linux95::gui::editor {
 constexpr size_t kTextCapacity = 65536;
 constexpr size_t kStatusCapacity = 96;
 constexpr size_t kPathCapacity = filesystem::vfs::kPathCapacity;
+
+enum class EditorAction : uint8_t {
+    None,
+    Save,
+    Quit,
+};
 
 class EditorModel {
 public:
@@ -40,6 +47,10 @@ public:
     bool file_exists() const;
     bool modified() const;
     const char* status_message() const;
+    EditorAction handle_key(const keyboard::KeyEvent& event);
+    void save_succeeded();
+    void save_failed(filesystem::Status status);
+    void set_status_message(const char* message);
 
 private:
     uint8_t* storage_;
@@ -54,6 +65,7 @@ private:
     bool file_exists_;
     bool modified_;
     bool initialized_;
+    bool forced_quit_pending_;
 
     void cursor_location(size_t& line, size_t& column) const;
     void reset_desired_column();

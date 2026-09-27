@@ -30,7 +30,8 @@ EditorModel::EditorModel(uint8_t* storage, size_t capacity)
       viewport_left_column_(0),
       file_exists_(false),
       modified_(false),
-      initialized_(false)
+      initialized_(false),
+      forced_quit_pending_(false)
 {
 }
 
@@ -63,6 +64,7 @@ bool EditorModel::initialize(
     file_exists_ = file_exists;
     modified_ = false;
     initialized_ = true;
+    forced_quit_pending_ = false;
     reset_desired_column();
     return true;
 }
@@ -260,5 +262,121 @@ const char* EditorModel::path() const { return path_; }
 bool EditorModel::file_exists() const { return file_exists_; }
 bool EditorModel::modified() const { return modified_; }
 const char* EditorModel::status_message() const { return status_; }
+
+void EditorModel::set_status_message(const char* message)
+{
+    size_t i = 0;
+    if (message != nullptr) {
+        while (i + 1 < sizeof(status_) && message[i] != '\0') {
+            status_[i] = message[i];
+            ++i;
+        }
+    }
+    status_[i] = '\0';
+}
+
+void EditorModel::save_succeeded()
+{
+    file_exists_ = true;
+    modified_ = false;
+    forced_quit_pending_ = false;
+    char message[kStatusCapacity];
+    constexpr char prefix[] = "Saved ";
+    size_t out = 0;
+    for (size_t i = 0; i + 1 < sizeof(message) && i < sizeof(prefix) - 1; ++i) {
+        message[out++] = prefix[i];
+    }
+    for (size_t i = 0; path_[i] != '\0' && out + 1 < sizeof(message); ++i) {
+        message[out++] = path_[i];
+    }
+    message[out] = '\0';
+    set_status_message(message);
+}
+
+void EditorModel::save_failed(filesystem::Status status)
+{
+    modified_ = true;
+    forced_quit_pending_ = false;
+    const char* reason = "unknown error";
+    switch (status) {
+    case filesystem::Status::NotMounted: reason = "filesystem not mounted"; break;
+    case filesystem::Status::IoError: reason = "I/O error"; break;
+    case filesystem::Status::InvalidFilesystem: reason = "invalid filesystem"; break;
+    case filesystem::Status::NotFound: reason = "not found"; break;
+    case filesystem::Status::NotDirectory: reason = "not a directory"; break;
+    case filesystem::Status::IsDirectory: reason = "is a directory"; break;
+    case filesystem::Status::Corrupt: reason = "filesystem corrupt"; break;
+    case filesystem::Status::Unsupported: reason = "unsupported operation"; break;
+    case filesystem::Status::InvalidDescriptor: reason = "invalid file descriptor"; break;
+    case filesystem::Status::InvalidHandle: reason = "invalid handle"; break;
+    case filesystem::Status::TooManyOpenFiles: reason = "too many open files"; break;
+    case filesystem::Status::TooManyOpenDirectories: reason = "too many open directories"; break;
+    case filesystem::Status::AlreadyExists: reason = "already exists"; break;
+    case filesystem::Status::InvalidName: reason = "invalid 8.3 name or path"; break;
+    case filesystem::Status::NoSpace: reason = "disk full"; break;
+    case filesystem::Status::DirectoryNotEmpty: reason = "directory not empty"; break;
+    case filesystem::Status::ReadOnly: reason = "read-only volume"; break;
+    case filesystem::Status::Ok: reason = "unknown error"; break;
+    }
+    char message[kStatusCapacity];
+    constexpr char prefix[] = "Save failed: ";
+    size_t out = 0;
+    for (size_t i = 0; i < sizeof(prefix) - 1; ++i) message[out++] = prefix[i];
+    for (size_t i = 0; reason[i] != '\0' && out + 1 < sizeof(message); ++i) {
+        message[out++] = reason[i];
+    }
+    message[out] = '\0';
+    set_status_message(message);
+}
+
+EditorAction EditorModel::handle_key(const keyboard::KeyEvent& event)
+{
+    if (!initialized_ || !event.pressed) return EditorAction::None;
+
+    if (event.key == keyboard::KeyCode::Character && event.ctrl &&
+        (event.character == 's' || event.character == 'S')) {
+        forced_quit_pending_ = false;
+        set_status_message("");
+        return EditorAction::Save;
+    }
+
+    if (event.key == keyboard::KeyCode::Character && event.ctrl &&
+        (event.character == 'q' || event.character == 'Q')) {
+        if (!modified_) {
+            forced_quit_pending_ = false;
+            set_status_message("");
+            return EditorAction::Quit;
+        }
+        if (forced_quit_pending_) {
+            forced_quit_pending_ = false;
+            return EditorAction::Quit;
+        }
+        forced_quit_pending_ = true;
+        set_status_message(
+            "Unsaved changes! Press Ctrl+Q again to quit without saving.");
+        return EditorAction::None;
+    }
+
+    forced_quit_pending_ = false;
+    set_status_message("");
+    if (event.key == keyboard::KeyCode::Character) {
+        if (!event.ctrl && !insert(static_cast<uint8_t>(event.character))) {
+            set_status_message("Buffer full or unsupported character");
+        }
+    } else if (event.key == keyboard::KeyCode::Enter) {
+        if (!insert_newline()) set_status_message("Buffer full");
+    } else if (event.key == keyboard::KeyCode::Backspace) {
+        static_cast<void>(backspace());
+    } else if (event.key == keyboard::KeyCode::ArrowLeft) {
+        move_left();
+    } else if (event.key == keyboard::KeyCode::ArrowRight) {
+        move_right();
+    } else if (event.key == keyboard::KeyCode::ArrowUp) {
+        move_up();
+    } else if (event.key == keyboard::KeyCode::ArrowDown) {
+        move_down();
+    }
+    return EditorAction::None;
+}
 
 } // namespace linux95::gui::editor

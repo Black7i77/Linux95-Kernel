@@ -91,4 +91,13 @@ filesystem::Status open_file(EditorModel& model, const char* path)
     return filesystem::Status::Ok;
 }
 
+filesystem::Status save_file(EditorModel& model)
+{
+    const filesystem::Status status = filesystem::vfs::write_file(
+        model.path(), model.data(), model.length());
+    if (status == filesystem::Status::Ok) model.save_succeeded();
+    else model.save_failed(status);
+    return status;
+}
+
 } // namespace linux95::gui::editor
