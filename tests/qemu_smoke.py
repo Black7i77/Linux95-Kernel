@@ -2,6 +2,7 @@
 
 from pathlib import Path
 import hashlib
+import json
 import socket
 import shutil
 import subprocess
@@ -20,26 +21,30 @@ WITHOUT_USER_PROGRAMS = "--without-user-programs" in sys.argv[1:]
 UDP_NETWORK_TEST = "--udp-network-test" in sys.argv[1:]
 DNS_NETWORK_TEST = "--dns-network-test" in sys.argv[1:]
 FAT32_WRITE_TEST = "--fat32-write-test" in sys.argv[1:]
+EDITOR_TEST = "--editor-test" in sys.argv[1:]
 FAT32_WRITE_BYTES = b"Linux95 FAT32 write proof\x00\xff\n"
 UDP_PAYLOAD = b"linux95-udp-echo"
 UDP_INVALID_REPLY = b"linux95-udp-evil"
 
 if sum((WITHOUT_NETWORK, PROCESS_SELF_TEST, PROCESS_FAULT_TEST,
         PROCESS_PREEMPTION_TEST, WITHOUT_USER_PROGRAMS,
-        UDP_NETWORK_TEST, DNS_NETWORK_TEST, FAT32_WRITE_TEST)) > 1 or any(
+        UDP_NETWORK_TEST, DNS_NETWORK_TEST, FAT32_WRITE_TEST,
+        EDITOR_TEST)) > 1 or any(
         argument not in ("--without-network", "--process-self-test",
                          "--process-fault-test", "--process-preemption-test",
                          "--without-user-programs", "--udp-network-test",
-                         "--dns-network-test", "--fat32-write-test")
+                         "--dns-network-test", "--fat32-write-test",
+                         "--editor-test")
        for argument in sys.argv[1:]):
     print("usage: qemu_smoke.py [--without-network] [--process-self-test] "
           "[--process-fault-test] [--process-preemption-test] "
           "[--without-user-programs] [--udp-network-test] "
-          "[--dns-network-test] [--fat32-write-test]")
+          "[--dns-network-test] [--fat32-write-test] [--editor-test]")
     sys.exit(2)
 
 ROOT = Path(__file__).resolve().parents[1]
 IMAGE = ROOT / "build" / (
+    "linux95-editor-test.img" if EDITOR_TEST else
     "linux95-fat32-write-test.img" if FAT32_WRITE_TEST else
     "linux95-kernel.img"
     if WITHOUT_NETWORK or PROCESS_SELF_TEST or PROCESS_FAULT_TEST or
@@ -50,6 +55,7 @@ IMAGE = ROOT / "build" / (
     else "linux95-kernel-network-test.img"
 )
 STORAGE_IMAGE = ROOT / "build" / (
+    "linux95-editor-test-fat.img" if EDITOR_TEST else
     "linux95-fat32-write-test-fat.img" if FAT32_WRITE_TEST else
     "linux95-preemption-test.img" if PROCESS_PREEMPTION_TEST else
     "linux95-fault-test.img" if PROCESS_FAULT_TEST else
@@ -59,13 +65,26 @@ STORAGE_IMAGE = ROOT / "build" / (
 LOG = ROOT / "build" / "qemu-debug.log"
 CANONICAL_STORAGE_IMAGE = ROOT / "build" / "linux95-storage-test.img"
 
-
 def image_digest(path):
     digest = hashlib.sha256()
     with path.open("rb") as image_file:
         for block in iter(lambda: image_file.read(1024 * 1024), b""):
             digest.update(block)
     return digest.hexdigest()
+
+
+editor_boot_digest = None
+if EDITOR_TEST:
+    subprocess.run(["make", "all", "build/linux95-editor-test.img",
+                    "prepare-editor-test-image"],
+                   cwd=ROOT, check=True)
+    editor_boot_digest = image_digest(IMAGE)
+    for name in ("NOSAVE.TXT", "SAVED.TXT"):
+        if subprocess.run(
+                ["mdir", "-i", str(STORAGE_IMAGE), f"::{name}"],
+                cwd=ROOT, stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL, check=False).returncode == 0:
+            raise RuntimeError(f"editor fixture unexpectedly contains {name}")
 
 
 canonical_digest = None
@@ -159,6 +178,13 @@ if not STORAGE_IMAGE.is_file():
     print(f"missing storage test image: {STORAGE_IMAGE}")
     sys.exit(1)
 
+editor_qmp_directory = None
+editor_qmp_socket = None
+if EDITOR_TEST:
+    editor_qmp_directory = tempfile.TemporaryDirectory(
+        prefix="editor-qmp-", dir=ROOT / "build")
+    editor_qmp_socket = str(Path(editor_qmp_directory.name) / "qmp.sock")
+
 LOG.unlink(missing_ok=True)
 
 echo_socket = None
@@ -214,6 +240,9 @@ if (not WITHOUT_NETWORK and not PROCESS_SELF_TEST and
         "-device", "rtl8139,netdev=net0",
     ])
 
+if EDITOR_TEST:
+    cmd.extend(["-qmp", f"unix:{editor_qmp_socket},server=on,wait=off"])
+
 proc = subprocess.Popen(
     cmd,
     stdout=subprocess.DEVNULL,
@@ -221,12 +250,16 @@ proc = subprocess.Popen(
     text=True,
 )
 
-deadline = time.monotonic() + (25.0 if DNS_NETWORK_TEST else 12.0)
+deadline = time.monotonic() + (30.0 if EDITOR_TEST else
+                               25.0 if DNS_NETWORK_TEST else 12.0)
 saw_completion = False
 completion_seen_at = None
 early_exit = None
+editor_failure = None
 completion_marker = (
-    "[PASS] fat32_write_complete"
+    "[PASS] shell accepted input"
+    if EDITOR_TEST
+    else "[PASS] fat32_write_complete"
     if FAT32_WRITE_TEST
     else
     "[PASS] preemptive round robin"
@@ -243,7 +276,101 @@ completion_marker = (
 )
 
 try:
-    while time.monotonic() < deadline:
+    if EDITOR_TEST:
+        qmp = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        qmp.settimeout(3)
+        qmp_deadline = time.monotonic() + 8.0
+        while True:
+            try:
+                qmp.connect(editor_qmp_socket)
+                break
+            except (FileNotFoundError, ConnectionRefusedError):
+                if time.monotonic() >= qmp_deadline:
+                    editor_failure = "QMP socket did not become ready"
+                    break
+                time.sleep(0.05)
+
+        if editor_failure is None:
+            qmp_file = qmp.makefile("rwb", buffering=0)
+            qmp_file.readline()  # QMP greeting.
+
+            def qmp_command(command):
+                qmp_file.write((json.dumps(command) + "\n").encode())
+                while True:
+                    response = json.loads(qmp_file.readline().decode())
+                    if "return" in response or "error" in response:
+                        if "error" in response:
+                            raise RuntimeError(
+                                f"QMP command failed: {response['error']}")
+                        return response
+
+            qmp_command({"execute": "qmp_capabilities"})
+
+            def send_key(name):
+                qmp_command({
+                    "execute": "human-monitor-command",
+                    "arguments": {
+                        "command-line": f"sendkey {name} 50"},
+                })
+                time.sleep(0.06)
+
+            def send_text(text):
+                for character in text:
+                    key_name = "spc" if character == " " else (
+                        "dot" if character == "." else character)
+                    send_key(key_name)
+
+            def wait_for_marker(marker, count=1, timeout=6.0):
+                marker_deadline = time.monotonic() + timeout
+                while time.monotonic() < marker_deadline:
+                    current = LOG.read_text(errors="replace") if LOG.exists() else ""
+                    if current.count(marker) >= count:
+                        return True
+                    if proc.poll() is not None:
+                        return False
+                    time.sleep(0.05)
+                return False
+
+            if not wait_for_marker("[PASS] desktop_online", timeout=10.0):
+                editor_failure = "Linux95 did not reach desktop before QMP input"
+            else:
+                send_text("edit nosave.txt")
+                send_key("ret")
+                if not wait_for_marker("[PASS] editor opened"):
+                    editor_failure = "missing [PASS] editor opened after first edit"
+                else:
+                    send_key("ctrl-q")
+                    if not wait_for_marker("[PASS] editor returned to shell"):
+                        editor_failure = "missing editor return marker after clean quit"
+                    else:
+                        send_text("edit saved.txt")
+                        send_key("ret")
+                        if not wait_for_marker("[PASS] editor opened", count=2):
+                            editor_failure = "missing second editor-open marker"
+                        else:
+                            send_text("editor saved")
+                            send_key("ctrl-s")
+                            if not wait_for_marker("[PASS] editor saved"):
+                                editor_failure = "missing editor-save marker"
+                            else:
+                                send_key("ctrl-q")
+                                if not wait_for_marker(
+                                        "[PASS] editor returned to shell", count=2):
+                                    editor_failure = "missing editor return marker after save"
+                                else:
+                                    send_text("version")
+                                    send_key("ret")
+                                    if not wait_for_marker(
+                                            "[PASS] shell accepted input"):
+                                        editor_failure = "missing shell-input marker after editor exit"
+                                    else:
+                                        completion_seen_at = time.monotonic()
+                                        time.sleep(1.0)
+                                        saw_completion = True
+            qmp_file.close()
+        qmp.close()
+
+    while not EDITOR_TEST and time.monotonic() < deadline:
         rc = proc.poll()
         if rc is not None:
             early_exit = rc
@@ -293,6 +420,8 @@ finally:
     if echo_socket is not None:
         echo_socket.close()
         echo_thread.join(timeout=1)
+    if editor_qmp_directory is not None:
+        editor_qmp_directory.cleanup()
 
 stderr = ""
 if proc.stderr is not None:
@@ -312,6 +441,10 @@ if early_exit is not None and not saw_completion:
 if not saw_completion:
     print("qemu smoke test: FAIL")
     print("completion observation did not finish before deadline")
+    if editor_failure is not None:
+        print("editor test detail:", editor_failure)
+    elif EDITOR_TEST:
+        print("editor test RED: expected real editor markers or key flow were absent")
     if DNS_NETWORK_TEST:
         missing_dns = [marker for marker in (
             "[PASS] dns_query_accepted",
@@ -399,6 +532,8 @@ elif WITHOUT_USER_PROGRAMS:
         "[PASS] ipv4_ready",
         "[PASS] icmp_ready",
     ])
+elif EDITOR_TEST:
+    pass
 else:
     required.extend([
         "[PASS] rtl8139_detected",
@@ -469,6 +604,14 @@ if FAT32_WRITE_TEST:
         "[PASS] fat32_write_complete",
     ])
 
+if EDITOR_TEST:
+    required.extend([
+        "[PASS] editor opened",
+        "[PASS] editor returned to shell",
+        "[PASS] editor saved",
+        "[PASS] shell accepted input",
+    ])
+
 missing = [marker for marker in required if marker not in content]
 
 if missing:
@@ -484,6 +627,63 @@ if missing:
         print("--- qemu stderr ---")
         print(stderr.strip())
     sys.exit(1)
+
+if EDITOR_TEST:
+    editor_order = [
+        "[PASS] editor opened",
+        "[PASS] editor returned to shell",
+        "[PASS] editor opened",
+        "[PASS] editor saved",
+        "[PASS] editor returned to shell",
+        "[PASS] shell accepted input",
+    ]
+    positions = []
+    cursor = 0
+    for marker in editor_order:
+        position = content.find(marker, cursor)
+        positions.append(position)
+        if position >= 0:
+            cursor = position + len(marker)
+    expected_counts = {
+        "[PASS] editor opened": 2,
+        "[PASS] editor returned to shell": 2,
+        "[PASS] editor saved": 1,
+        "[PASS] shell accepted input": 1,
+    }
+    if (any(position < 0 for position in positions) or
+            positions != sorted(positions) or
+            any(content.count(marker) != count
+                for marker, count in expected_counts.items())):
+        print("qemu smoke test: FAIL")
+        print("editor lifecycle markers were missing, repeated, or out of order")
+        print("--- debug log ---")
+        print(content or "(empty)")
+        sys.exit(1)
+    if editor_boot_digest is not None and image_digest(IMAGE) != editor_boot_digest:
+        print("qemu smoke test: FAIL")
+        print("editor test modified the Boot image")
+        sys.exit(1)
+    with tempfile.TemporaryDirectory() as temp_dir:
+        saved = Path(temp_dir) / "SAVED.TXT"
+        copied = subprocess.run(
+            ["mcopy", "-i", str(STORAGE_IMAGE), "::SAVED.TXT", str(saved)],
+            cwd=ROOT, capture_output=True, text=True, check=False)
+        if copied.returncode != 0 or not saved.is_file() or \
+                saved.read_bytes() != b"editor saved":
+            print("qemu smoke test: FAIL")
+            print("saved editor payload did not persist on the Test image")
+            print(copied.stderr.strip())
+            sys.exit(1)
+    if subprocess.run(
+            ["mdir", "-i", str(STORAGE_IMAGE), "::NOSAVE.TXT"],
+            cwd=ROOT, stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL, check=False).returncode == 0:
+        print("qemu smoke test: FAIL")
+        print("clean quit created NOSAVE.TXT without a save")
+        sys.exit(1)
+    print("[PASS] editor data persisted on the same disposable Test image")
+    print("[PASS] clean quit left NOSAVE.TXT absent")
+    print("[PASS] Boot image remained unchanged")
 
 if FAT32_WRITE_TEST:
     write_markers = required[-8:]

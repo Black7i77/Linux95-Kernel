@@ -1,10 +1,23 @@
 #pragma once
 
+#include "filesystem/vfs.hpp"
 #include "terminal/output.hpp"
+
+#include <stdint.h>
 
 namespace linux95::shell {
 
-void execute_command(
+enum class CommandAction : uint8_t {
+    Continue,
+    OpenEditor,
+};
+
+struct CommandResult {
+    CommandAction action;
+    char path[filesystem::vfs::kPathCapacity];
+};
+
+CommandResult execute_command(
     terminal::Output& output,
     char* command);
 

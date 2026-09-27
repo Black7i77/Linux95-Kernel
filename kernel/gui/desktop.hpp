@@ -68,7 +68,7 @@ bool route_key(
     const gui::WindowManager& windows,
     gui::AppInstance& terminal,
     gui::AppInstance& system_info,
-    char c);
+    const keyboard::KeyEvent& event);
 
 gui::Rect content_rect(
     gui::Rect bounds);

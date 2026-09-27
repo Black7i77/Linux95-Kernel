@@ -14,18 +14,19 @@ def main():
     process_fault = "--process-fault" in sys.argv[2:]
     process_preemption = "--process-preemption" in sys.argv[2:]
     fat32_write = "--fat32-write" in sys.argv[2:]
+    editor_test = "--editor-test" in sys.argv[2:]
 
-    if sum((process_fault, process_preemption, fat32_write)) > 1:
+    if sum((process_fault, process_preemption, fat32_write, editor_test)) > 1:
         print("FAT32 fixture modes are mutually exclusive")
         return 2
 
     if len(sys.argv) not in (2, 3) or any(
             argument not in ("--process-fault", "--process-preemption",
-                             "--fat32-write")
+                             "--fat32-write", "--editor-test")
             for argument in sys.argv[2:]):
         print(
             "usage: prepare_fat32_image.py <output-image> "
-            "[--process-fault|--process-preemption|--fat32-write]"
+            "[--process-fault|--process-preemption|--fat32-write|--editor-test]"
         )
         return 2
 
@@ -155,6 +156,16 @@ def main():
             paths.append("::USER/FAULT.ELF")
         for path in paths:
             run(["mdir", "-i", str(image), path])
+
+        if editor_test:
+            for path in ("::NOSAVE.TXT", "::SAVED.TXT"):
+                if subprocess.run(
+                        ["mdir", "-i", str(image), path],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        check=False).returncode == 0:
+                    print(f"editor test fixture must omit {path}")
+                    return 1
 
     print(f"FAT32 fixture created: {image}")
     return 0

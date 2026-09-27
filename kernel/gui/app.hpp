@@ -1,5 +1,6 @@
 #pragma once
 
+#include "arch/keyboard.hpp"
 #include "graphics/renderer.hpp"
 
 namespace linux95::gui {
@@ -12,7 +13,7 @@ struct AppCallbacks {
 
     void (*on_key)(
         void* context,
-        char c);
+        const keyboard::KeyEvent& event);
 
     void (*on_close)(
         void* context);

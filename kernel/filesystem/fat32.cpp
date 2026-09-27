@@ -397,7 +397,7 @@ Status resolve_entry(
 
     if (*cursor == '\0' ||
         !helpers::valid_path(cursor)) {
-        return Status::Unsupported;
+        return Status::InvalidName;
     }
 
     uint32_t directory_cluster =

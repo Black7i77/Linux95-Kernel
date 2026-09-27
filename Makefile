@@ -26,6 +26,8 @@ FAULT_TEST_IMAGE := $(BUILD)/linux95-fault-test.img
 PREEMPTION_TEST_IMAGE := $(BUILD)/linux95-preemption-test.img
 FAT32_WRITE_TEST_IMAGE := $(BUILD)/linux95-fat32-write-test.img
 FAT32_WRITE_TEST_FAT_IMAGE := $(BUILD)/linux95-fat32-write-test-fat.img
+EDITOR_TEST_IMAGE := $(BUILD)/linux95-editor-test.img
+EDITOR_TEST_FAT_IMAGE := $(BUILD)/linux95-editor-test-fat.img
 
 HOST_CXXFLAGS := -std=c++17 -Wall -Wextra -Werror -O2 -Ikernel
 
@@ -63,6 +65,7 @@ KERNEL_OBJS := \
 	$(BUILD)/kernel.o \
 	$(BUILD)/vga.o $(BUILD)/vga_output.o $(BUILD)/shell_session.o $(BUILD)/framebuffer.o $(BUILD)/renderer.o \
         $(BUILD)/terminal_model.o $(BUILD)/terminal_app.o \
+        $(BUILD)/editor_model.o $(BUILD)/editor_file.o \
         $(BUILD)/system_info_app.o \
         $(BUILD)/window_manager.o \
         $(BUILD)/desktop.o \
@@ -106,6 +109,7 @@ KERNEL_OBJS := \
 	$(BUILD)/filesystem_self_test.o \
 	$(BUILD)/vfs_self_test.o \
 	$(BUILD)/shell.o \
+	$(BUILD)/shell_edit.o \
 	$(BUILD)/filesystem_commands.o
 
 NETWORK_TEST_OBJS := $(subst $(BUILD)/kernel.o,$(BUILD)/kernel-network-test.o,$(KERNEL_OBJS))
@@ -115,10 +119,12 @@ UDP_NETWORK_TEST_IMAGE := $(BUILD)/linux95-udp-network-test.img
 DNS_NETWORK_TEST_OBJS := $(subst $(BUILD)/dns.o,$(BUILD)/dns-dns-network-test.o,$(subst $(BUILD)/network.o,$(BUILD)/network-dns-network-test.o,$(subst $(BUILD)/kernel.o,$(BUILD)/kernel-dns-network-test.o,$(KERNEL_OBJS))))
 DNS_NETWORK_TEST_IMAGE := $(BUILD)/linux95-dns-network-test.img
 FAT32_WRITE_TEST_OBJS := $(subst $(BUILD)/fat32_write.o,$(BUILD)/fat32-write-test-writer.o,$(subst $(BUILD)/kernel.o,$(BUILD)/kernel-fat32-write-test.o,$(KERNEL_OBJS))) $(BUILD)/fat32_write_self_test.o
+EDITOR_TEST_OBJS := $(subst $(BUILD)/terminal_app.o,$(BUILD)/editor-test-terminal-app.o,$(KERNEL_OBJS))
 
-.PHONY: all clean run run-debug test test-qemu prepare-storage-test-image test-host-segments test-host-process test-host-scheduler test-host-user-space test-host-elf test-host-elf-loader-plan test-host-syscall test-host-memory test-host-storage test-host-filesystem test-host-graphics test-host-pci test-host-rtl8139-helpers test-host-kernel-virtual-to-physical test-host-ethernet test-host-arp test-host-ipv4 test-host-icmp test-host-udp test-host-udp-bindings test-host-network-udp test-host-dns-message test-host-dns-response test-host-dns-resolver test-host-heap test-memory-source test-storage-source test-relocations check-tools
+.PHONY: all clean run run-debug test test-qemu prepare-storage-test-image test-host-keyboard test-host-keyboard-queue-concurrency test-host-terminal-key-event test-host-editor-model test-host-shell-edit test-host-editor-file test-host-editor-state test-host-terminal-editor-integration test-host-segments test-host-process test-host-scheduler test-host-user-space test-host-elf test-host-elf-loader-plan test-host-syscall test-host-memory test-host-storage test-host-filesystem test-host-graphics test-host-pci test-host-rtl8139-helpers test-host-kernel-virtual-to-physical test-host-ethernet test-host-arp test-host-ipv4 test-host-icmp test-host-udp test-host-udp-bindings test-host-network-udp test-host-dns-message test-host-dns-response test-host-dns-resolver test-host-heap test-memory-source test-storage-source test-relocations check-tools
+.PHONY: prepare-editor-test-image
 
-all: check-tools $(BUILD)/linux95-kernel.img $(BUILD)/user/init.elf $(BUILD)/user/worker.elf
+all: check-tools $(BUILD)/linux95-kernel.img $(BUILD)/user/init.elf $(BUILD)/user/worker.elf $(BUILD)/editor_model.o $(BUILD)/editor_file.o
 
 check-tools:
 >@for tool in $(NASM) $(CXX) $(LD) $(OBJCOPY) $(READELF) $(PYTHON); do \
@@ -264,8 +270,17 @@ $(BUILD)/renderer.o: kernel/graphics/renderer.cpp kernel/graphics/renderer.hpp k
 $(BUILD)/terminal_model.o: kernel/gui/terminal_model.cpp kernel/gui/terminal_model.hpp kernel/terminal/output.hpp | $(BUILD)
 >$(CXX) $(CXXFLAGS) -c $< -o $@
 
-$(BUILD)/terminal_app.o: kernel/gui/terminal_app.cpp kernel/gui/terminal_app.hpp kernel/gui/app.hpp kernel/gui/terminal_model.hpp kernel/terminal/shell_session.hpp kernel/terminal/shell.hpp kernel/graphics/renderer.hpp kernel/net/network.hpp kernel/net/dns.hpp | $(BUILD)
->$(CXX) $(CXXFLAGS) -c $< -o $@
+$(BUILD)/editor_model.o: kernel/gui/editor_model.cpp kernel/gui/editor_model.hpp kernel/filesystem/vfs.hpp kernel/filesystem/filesystem.hpp | $(BUILD)
+>$(CXX) $(CXXFLAGS) -Os -c $< -o $@
+
+$(BUILD)/editor_file.o: kernel/gui/editor_file.cpp kernel/gui/editor_file.hpp kernel/gui/editor_model.hpp kernel/filesystem/vfs.hpp kernel/filesystem/filesystem.hpp | $(BUILD)
+>$(CXX) $(CXXFLAGS) -Os -c $< -o $@
+
+$(BUILD)/terminal_app.o: kernel/gui/terminal_app.cpp kernel/gui/terminal_app.hpp kernel/gui/app.hpp kernel/gui/terminal_model.hpp kernel/gui/editor_model.hpp kernel/gui/editor_file.hpp kernel/terminal/shell_session.hpp kernel/terminal/shell.hpp kernel/terminal/shell_edit.hpp kernel/graphics/renderer.hpp kernel/net/network.hpp kernel/net/dns.hpp | $(BUILD)
+>$(CXX) $(CXXFLAGS) -Os -c $< -o $@
+
+$(BUILD)/editor-test-terminal-app.o: kernel/gui/terminal_app.cpp kernel/gui/terminal_app.hpp kernel/gui/app.hpp kernel/gui/terminal_model.hpp kernel/gui/editor_model.hpp kernel/gui/editor_file.hpp kernel/terminal/shell_session.hpp kernel/terminal/shell.hpp kernel/terminal/shell_edit.hpp kernel/graphics/renderer.hpp kernel/net/network.hpp kernel/net/dns.hpp | $(BUILD)
+>$(CXX) $(CXXFLAGS) -Os -DLINUX95_QEMU_EDITOR_SELF_TEST -c $< -o $@
 
 $(BUILD)/system_info_app.o: kernel/gui/system_info_app.cpp kernel/gui/system_info_app.hpp kernel/gui/app.hpp kernel/graphics/renderer.hpp kernel/arch/pit.hpp kernel/memory/memory.hpp kernel/memory/physical.hpp kernel/memory/heap.hpp kernel/storage/disk.hpp kernel/filesystem/filesystem.hpp | $(BUILD)
 >$(CXX) $(CXXFLAGS) -c $< -o $@
@@ -300,7 +315,7 @@ $(BUILD)/pic.o: kernel/arch/pic.cpp kernel/arch/pic.hpp | $(BUILD)
 $(BUILD)/pit.o: kernel/arch/pit.cpp kernel/arch/pit.hpp | $(BUILD)
 >$(CXX) $(CXXFLAGS) -c $< -o $@
 
-$(BUILD)/keyboard.o: kernel/arch/keyboard.cpp kernel/arch/keyboard.hpp | $(BUILD)
+$(BUILD)/keyboard.o: kernel/arch/keyboard.cpp kernel/arch/keyboard.hpp kernel/arch/keyboard_helpers.hpp | $(BUILD)
 >$(CXX) $(CXXFLAGS) -c $< -o $@
 
 $(BUILD)/ps2.o: kernel/arch/ps2.cpp kernel/arch/ps2.hpp kernel/arch/io.hpp | $(BUILD)
@@ -605,11 +620,16 @@ $(BUILD)/storage_self_test.o: kernel/storage/storage_self_test.cpp kernel/storag
 $(BUILD)/shell.o: \
 	kernel/terminal/shell.cpp \
 	kernel/terminal/shell.hpp \
+	kernel/terminal/shell_edit.hpp \
+	kernel/terminal/key_event_adapter.hpp \
 	kernel/terminal/filesystem_commands.hpp \
 	kernel/filesystem/vfs.hpp \
 	kernel/net/network.hpp \
 	kernel/net/dns.hpp \
 	kernel/terminal/shell_session.hpp | $(BUILD)
+>$(CXX) $(CXXFLAGS) -Os -c $< -o $@
+
+$(BUILD)/shell_edit.o: kernel/terminal/shell_edit.cpp kernel/terminal/shell_edit.hpp kernel/terminal/shell.hpp kernel/filesystem/vfs.hpp kernel/terminal/output.hpp | $(BUILD)
 >$(CXX) $(CXXFLAGS) -c $< -o $@
 
 $(BUILD)/filesystem_commands.o: kernel/terminal/filesystem_commands.cpp kernel/terminal/filesystem_commands.hpp kernel/filesystem/vfs.hpp kernel/terminal/output.hpp | $(BUILD)
@@ -692,6 +712,17 @@ $(BUILD)/kernel-fat32-write-test.bin: $(BUILD)/kernel-fat32-write-test.elf
 	max=$$(( $(KERNEL_SECTORS) * $(SECTOR) )); \
 	test $$size -le $$max || { echo "ERROR: FAT32-write kernel too large: $$size > $$max"; exit 1; }
 
+$(BUILD)/kernel-editor-test.elf: $(EDITOR_TEST_OBJS) linker.ld
+>$(LD) -nostdlib -z max-page-size=0x1000 -T linker.ld -o $@ $(EDITOR_TEST_OBJS)
+>@entry=$$($(READELF) -h $@ | awk '/Entry point address:/ {print $$4}'); \
+	test "$$entry" = "0x100000" || { echo "ERROR: bad editor-test kernel entry: $$entry"; exit 1; }
+
+$(BUILD)/kernel-editor-test.bin: $(BUILD)/kernel-editor-test.elf
+>$(OBJCOPY) -O binary $< $@
+>@size=$$(stat -c%s $@); \
+	max=$$(( $(KERNEL_SECTORS) * $(SECTOR) )); \
+	test $$size -le $$max || { echo "ERROR: editor-test kernel too large: $$size > $$max"; exit 1; }
+
 $(BUILD)/linux95-kernel.img: \
 	$(BUILD)/stage1.bin \
 	$(BUILD)/stage2.bin \
@@ -737,6 +768,12 @@ $(FAT32_WRITE_TEST_IMAGE): $(BUILD)/stage1.bin $(BUILD)/stage2.bin $(BUILD)/kern
 >dd if=$(BUILD)/stage2.bin of=$@ bs=$(SECTOR) seek=1 conv=notrunc status=none
 >dd if=$(BUILD)/kernel-fat32-write-test.bin of=$@ bs=$(SECTOR) seek=$(KERNEL_LBA) conv=notrunc status=none
 
+$(EDITOR_TEST_IMAGE): $(BUILD)/stage1.bin $(BUILD)/stage2.bin $(BUILD)/kernel-editor-test.bin
+>dd if=/dev/zero of=$@ bs=$(SECTOR) count=$(IMAGE_SECTORS) status=none
+>dd if=$(BUILD)/stage1.bin of=$@ bs=$(SECTOR) seek=0 conv=notrunc status=none
+>dd if=$(BUILD)/stage2.bin of=$@ bs=$(SECTOR) seek=1 conv=notrunc status=none
+>dd if=$(BUILD)/kernel-editor-test.bin of=$@ bs=$(SECTOR) seek=$(KERNEL_LBA) conv=notrunc status=none
+
 $(STORAGE_TEST_IMAGE): tests/prepare_fat32_image.py $(BUILD)/user/init.elf $(BUILD)/user/worker.elf | $(BUILD)
 >@for tool in mkfs.fat mmd mcopy; do \
 	command -v $$tool >/dev/null || { echo "Missing tool: $$tool"; exit 1; }; \
@@ -750,6 +787,12 @@ $(PREEMPTION_TEST_IMAGE): tests/prepare_fat32_image.py $(BUILD)/user/preempt_hog
 >$(PYTHON) tests/prepare_fat32_image.py $@ --process-preemption
 
 prepare-storage-test-image: $(STORAGE_TEST_IMAGE)
+
+$(EDITOR_TEST_FAT_IMAGE): tests/prepare_fat32_image.py $(BUILD)/user/init.elf $(BUILD)/user/worker.elf | $(BUILD)
+>$(PYTHON) tests/prepare_fat32_image.py $@ --editor-test
+
+prepare-editor-test-image: $(BUILD)/user/init.elf $(BUILD)/user/worker.elf | $(BUILD)
+>$(PYTHON) tests/prepare_fat32_image.py $(EDITOR_TEST_FAT_IMAGE) --editor-test
 
 .PHONY: prepare-fat32-write-test-image
 prepare-fat32-write-test-image: $(BUILD)/user/init.elf $(BUILD)/user/worker.elf | $(BUILD)
@@ -839,7 +882,7 @@ test-host-graphics: test-host-mouse-helpers
 
 .PHONY: test-host-shell-session
 
-$(BUILD)/host-shell-session-test: tests/host/shell_session_test.cpp kernel/terminal/output.hpp kernel/terminal/shell_session.hpp kernel/terminal/shell_session.cpp kernel/net/network.hpp kernel/net/dns.hpp | $(BUILD)
+$(BUILD)/host-shell-session-test: tests/host/shell_session_test.cpp kernel/terminal/output.hpp kernel/terminal/shell.hpp kernel/terminal/shell_session.hpp kernel/terminal/shell_session.cpp kernel/net/network.hpp kernel/net/dns.hpp | $(BUILD)
 >$(CXX) $(HOST_CXXFLAGS) tests/host/shell_session_test.cpp kernel/terminal/shell_session.cpp -o $@
 
 test-host-shell-session: $(BUILD)/host-shell-session-test
@@ -866,3 +909,65 @@ test-host-terminal-model: $(BUILD)/host-terminal-model-test
 >$(BUILD)/host-terminal-model-test
 
 test-host-graphics: test-host-terminal-model
+
+$(BUILD)/host-keyboard-test: tests/host/keyboard_test.cpp kernel/arch/keyboard.hpp kernel/arch/keyboard_helpers.hpp | $(BUILD)
+>$(CXX) $(HOST_CXXFLAGS) $< -o $@
+
+test-host-keyboard: $(BUILD)/host-keyboard-test
+>$(BUILD)/host-keyboard-test
+
+test-host-keyboard-queue-concurrency: $(BUILD)/host-keyboard-queue-concurrency-test
+>$(BUILD)/host-keyboard-queue-concurrency-test
+
+$(BUILD)/host-keyboard-queue-concurrency-test: tests/host/keyboard_queue_concurrency_test.cpp kernel/arch/keyboard_helpers.hpp kernel/arch/keyboard.hpp | $(BUILD)
+>$(CXX) $(HOST_CXXFLAGS) -pthread $< -o $@
+
+test-host-graphics: test-host-keyboard test-host-keyboard-queue-concurrency
+
+$(BUILD)/host-terminal-key-event-test: tests/host/terminal_key_event_test.cpp kernel/gui/desktop.cpp kernel/gui/desktop.hpp kernel/gui/app.hpp kernel/gui/window_manager.cpp kernel/gui/window_manager.hpp kernel/arch/keyboard.hpp | $(BUILD)
+>$(CXX) $(HOST_CXXFLAGS) -ffunction-sections -fdata-sections $< kernel/gui/desktop.cpp kernel/gui/window_manager.cpp -Wl,--gc-sections -o $@
+
+test-host-terminal-key-event: $(BUILD)/host-terminal-key-event-test
+>$(BUILD)/host-terminal-key-event-test
+
+test-host-graphics: test-host-terminal-key-event
+
+$(BUILD)/host-editor-model-test: tests/host/editor_model_test.cpp kernel/gui/editor_model.hpp kernel/gui/editor_model.cpp | $(BUILD)
+>$(CXX) $(HOST_CXXFLAGS) $< kernel/gui/editor_model.cpp -o $@
+
+test-host-editor-model: $(BUILD)/host-editor-model-test
+>$(BUILD)/host-editor-model-test
+
+test-host-graphics: test-host-editor-model
+
+$(BUILD)/host-shell-edit-test: tests/host/shell_edit_test.cpp kernel/terminal/shell_edit.hpp kernel/terminal/shell_edit.cpp kernel/terminal/shell.hpp kernel/filesystem/vfs.hpp | $(BUILD)
+>$(CXX) $(HOST_CXXFLAGS) tests/host/shell_edit_test.cpp kernel/terminal/shell_edit.cpp -o $@
+
+test-host-shell-edit: $(BUILD)/host-shell-edit-test
+>$(BUILD)/host-shell-edit-test
+
+test-host-graphics: test-host-shell-edit
+
+$(BUILD)/host-editor-file-test: tests/host/editor_file_test.cpp kernel/gui/editor_file.hpp kernel/gui/editor_file.cpp kernel/gui/editor_model.hpp kernel/gui/editor_model.cpp kernel/filesystem/vfs.hpp kernel/filesystem/filesystem.hpp | $(BUILD)
+>$(CXX) $(HOST_CXXFLAGS) $< kernel/gui/editor_file.cpp kernel/gui/editor_model.cpp -o $@
+
+test-host-editor-file: $(BUILD)/host-editor-file-test
+>$(BUILD)/host-editor-file-test
+
+test-host-graphics: test-host-editor-file
+
+$(BUILD)/host-editor-state-test: tests/host/editor_state_test.cpp kernel/gui/editor_model.hpp kernel/gui/editor_model.cpp kernel/arch/keyboard.hpp kernel/filesystem/filesystem.hpp | $(BUILD)
+>$(CXX) $(HOST_CXXFLAGS) $< kernel/gui/editor_model.cpp -o $@
+
+test-host-editor-state: $(BUILD)/host-editor-state-test
+>$(BUILD)/host-editor-state-test
+
+test-host-graphics: test-host-editor-state
+
+$(BUILD)/host-terminal-editor-integration-test: tests/host/terminal_editor_integration_test.cpp kernel/gui/terminal_app.cpp kernel/gui/terminal_app.hpp kernel/gui/terminal_model.cpp kernel/gui/editor_model.cpp kernel/gui/editor_file.cpp kernel/terminal/shell_session.cpp kernel/terminal/shell_session.hpp kernel/graphics/renderer.cpp kernel/graphics/renderer.hpp kernel/graphics/framebuffer.hpp | $(BUILD)
+>$(CXX) $(HOST_CXXFLAGS) -ffunction-sections -fdata-sections tests/host/terminal_editor_integration_test.cpp kernel/gui/terminal_app.cpp kernel/gui/terminal_model.cpp kernel/gui/editor_model.cpp kernel/gui/editor_file.cpp kernel/terminal/shell_session.cpp kernel/graphics/renderer.cpp -Wl,--gc-sections -o $@
+
+test-host-terminal-editor-integration: $(BUILD)/host-terminal-editor-integration-test
+>$(BUILD)/host-terminal-editor-integration-test
+
+test-host-graphics: test-host-terminal-editor-integration
