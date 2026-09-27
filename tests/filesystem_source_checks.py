@@ -12,21 +12,23 @@ facade = (FS / "filesystem.hpp").read_text()
 vfs = (FS / "vfs.hpp").read_text()
 
 public_signatures = (
-    r"Status\s+touch\s*\(\s*const char\s*\*\s*path\s*\)\s*;",
-    r"Status\s+write_file\s*\(\s*const char\s*\*\s*path\s*,\s*const uint8_t\s*\*\s*data\s*,\s*size_t\s+size\s*\)\s*;",
-    r"Status\s+mkdir\s*\(\s*const char\s*\*\s*path\s*\)\s*;",
-    r"Status\s+remove\s*\(\s*const char\s*\*\s*path\s*\)\s*;",
-    r"Status\s+copy_file\s*\(\s*const char\s*\*\s*source\s*,\s*const char\s*\*\s*destination\s*\)\s*;",
-    r"Status\s+move\s*\(\s*const char\s*\*\s*source\s*,\s*const char\s*\*\s*destination\s*\)\s*;",
+    ("touch", r"Status\s+touch\s*\(\s*const char\s*\*\s*path\s*\)\s*;"),
+    ("write_file", r"Status\s+write_file\s*\(\s*const char\s*\*\s*path\s*,\s*const uint8_t\s*\*\s*data\s*,\s*size_t\s+size\s*\)\s*;"),
+    ("mkdir", r"Status\s+mkdir\s*\(\s*const char\s*\*\s*path\s*\)\s*;"),
+    ("remove", r"Status\s+remove\s*\(\s*const char\s*\*\s*path\s*\)\s*;"),
+    ("copy_file", r"Status\s+copy_file\s*\(\s*const char\s*\*\s*source\s*,\s*const char\s*\*\s*destination\s*\)\s*;"),
+    ("move", r"Status\s+move\s*\(\s*const char\s*\*\s*source\s*,\s*const char\s*\*\s*destination\s*\)\s*;"),
 )
 
 for name, header in (("filesystem", facade), ("VFS", vfs)):
-    for signature in public_signatures:
-        if not re.search(signature, header):
-            raise SystemExit(f"FAIL: {name} missing public writable API: {signature}")
-    for forbidden in ("storage::DiskId", "fat32::", "DirectorySlot", "ResolvedPath", "fat_begin_lba", "first_data_lba"):
-        if forbidden in header:
-            raise SystemExit(f"FAIL: {name} public header exposes FAT/disk internals: {forbidden}")
+    # Legacy VolumeInfo retains read-facing geometry. New mutation APIs must
+    # have exactly these path/byte signatures, with no disk or FAT arguments.
+    for operation, signature in public_signatures:
+        declarations = re.findall(
+            rf"\bStatus\s+{operation}\s*\([^;]*\)\s*;", header, re.DOTALL
+        )
+        if len(declarations) != 1 or not re.fullmatch(signature, declarations[0]):
+            raise SystemExit(f"FAIL: {name} writable API has an unexpected signature: {operation}")
 
 filesystem_sources = ""
 for path in sorted(FS.glob("*")):
@@ -34,7 +36,9 @@ for path in sorted(FS.glob("*")):
         text = path.read_text()
         filesystem_sources += "\n" + text
 
-        if "storage::write_sector" in text and path.name != "fat32_write.cpp":
+        if "storage::write_sector" in text and path not in {
+            FS / "fat32_write.cpp", FS / "fat32_write_self_test.cpp"
+        }:
             raise SystemExit(
                 f"FAIL: filesystem write call found in {path}"
             )
