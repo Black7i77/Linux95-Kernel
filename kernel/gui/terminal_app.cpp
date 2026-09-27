@@ -1,6 +1,7 @@
 #include "gui/terminal_app.hpp"
 #include "gui/editor_file.hpp"
 
+#include "arch/debug.hpp"
 #include "graphics/renderer.hpp"
 #include "net/network.hpp"
 #include "net/dns.hpp"
@@ -29,6 +30,9 @@ constexpr int32_t kCharacterWidth = 8;
 constexpr int32_t kCharacterHeight = 8;
 constexpr size_t kEditorMaxColumns = TerminalModel::kColumns;
 uint8_t g_editor_storage[editor::kTextCapacity];
+#if defined(LINUX95_QEMU_EDITOR_SELF_TEST)
+bool g_editor_test_waiting_for_shell_command = false;
+#endif
 
 void append_text(char* output, size_t capacity, size_t& length, const char* text)
 {
@@ -314,10 +318,21 @@ void TerminalApp::on_key(
         const editor::EditorAction action = editor_.handle_key(event);
         if (!event.pressed) return;
         if (action == editor::EditorAction::Save) {
-            static_cast<void>(editor::save_file(editor_));
+            const filesystem::Status status = editor::save_file(editor_);
+#if defined(LINUX95_QEMU_EDITOR_SELF_TEST)
+            if (status == filesystem::Status::Ok) {
+                debug::write("[PASS] editor saved\n");
+            }
+#else
+            static_cast<void>(status);
+#endif
         } else if (action == editor::EditorAction::Quit) {
             mode_ = Mode::Shell;
             session_.resume_prompt();
+#if defined(LINUX95_QEMU_EDITOR_SELF_TEST)
+            debug::write("[PASS] editor returned to shell\n");
+            g_editor_test_waiting_for_shell_command = true;
+#endif
         }
         return;
     }
@@ -325,17 +340,27 @@ void TerminalApp::on_key(
     char c = 0;
     if (!terminal::shell_character_for_key(event, c)) return;
     const shell::CommandResult result = session_.on_char(c);
-    if (result.action != shell::CommandAction::OpenEditor) return;
-
-    const filesystem::Status status = editor::open_file(editor_, result.path);
-    if (status == filesystem::Status::Ok) {
-        mode_ = Mode::Editor;
+    if (result.action == shell::CommandAction::OpenEditor) {
+        const filesystem::Status status = editor::open_file(editor_, result.path);
+        if (status == filesystem::Status::Ok) {
+            mode_ = Mode::Editor;
+#if defined(LINUX95_QEMU_EDITOR_SELF_TEST)
+            debug::write("[PASS] editor opened\n");
+#endif
+            return;
+        }
+        terminal::write(output_, "edit: ");
+        terminal::write(output_, open_error(status));
+        terminal::write(output_, "\n");
+        session_.resume_prompt();
         return;
     }
-    terminal::write(output_, "edit: ");
-    terminal::write(output_, open_error(status));
-    terminal::write(output_, "\n");
-    session_.resume_prompt();
+#if defined(LINUX95_QEMU_EDITOR_SELF_TEST)
+    if (g_editor_test_waiting_for_shell_command && c == '\n') {
+        debug::write("[PASS] shell accepted input\n");
+        g_editor_test_waiting_for_shell_command = false;
+    }
+#endif
 }
 
 void TerminalApp::draw_editor(
