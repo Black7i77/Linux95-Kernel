@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 
 from pathlib import Path
+import hashlib
 import socket
 import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 
@@ -17,25 +19,28 @@ PROCESS_PREEMPTION_TEST = "--process-preemption-test" in sys.argv[1:]
 WITHOUT_USER_PROGRAMS = "--without-user-programs" in sys.argv[1:]
 UDP_NETWORK_TEST = "--udp-network-test" in sys.argv[1:]
 DNS_NETWORK_TEST = "--dns-network-test" in sys.argv[1:]
+FAT32_WRITE_TEST = "--fat32-write-test" in sys.argv[1:]
+FAT32_WRITE_BYTES = b"Linux95 FAT32 write proof\x00\xff\n"
 UDP_PAYLOAD = b"linux95-udp-echo"
 UDP_INVALID_REPLY = b"linux95-udp-evil"
 
 if sum((WITHOUT_NETWORK, PROCESS_SELF_TEST, PROCESS_FAULT_TEST,
         PROCESS_PREEMPTION_TEST, WITHOUT_USER_PROGRAMS,
-        UDP_NETWORK_TEST, DNS_NETWORK_TEST)) > 1 or any(
+        UDP_NETWORK_TEST, DNS_NETWORK_TEST, FAT32_WRITE_TEST)) > 1 or any(
         argument not in ("--without-network", "--process-self-test",
                          "--process-fault-test", "--process-preemption-test",
                          "--without-user-programs", "--udp-network-test",
-                         "--dns-network-test")
+                         "--dns-network-test", "--fat32-write-test")
        for argument in sys.argv[1:]):
     print("usage: qemu_smoke.py [--without-network] [--process-self-test] "
           "[--process-fault-test] [--process-preemption-test] "
           "[--without-user-programs] [--udp-network-test] "
-          "[--dns-network-test]")
+          "[--dns-network-test] [--fat32-write-test]")
     sys.exit(2)
 
 ROOT = Path(__file__).resolve().parents[1]
 IMAGE = ROOT / "build" / (
+    "linux95-fat32-write-test.img" if FAT32_WRITE_TEST else
     "linux95-kernel.img"
     if WITHOUT_NETWORK or PROCESS_SELF_TEST or PROCESS_FAULT_TEST or
             PROCESS_PREEMPTION_TEST or WITHOUT_USER_PROGRAMS
@@ -45,12 +50,57 @@ IMAGE = ROOT / "build" / (
     else "linux95-kernel-network-test.img"
 )
 STORAGE_IMAGE = ROOT / "build" / (
+    "linux95-fat32-write-test-fat.img" if FAT32_WRITE_TEST else
     "linux95-preemption-test.img" if PROCESS_PREEMPTION_TEST else
     "linux95-fault-test.img" if PROCESS_FAULT_TEST else
     "linux95-no-user-test.img" if WITHOUT_USER_PROGRAMS else
     "linux95-storage-test.img"
 )
 LOG = ROOT / "build" / "qemu-debug.log"
+CANONICAL_STORAGE_IMAGE = ROOT / "build" / "linux95-storage-test.img"
+
+
+def image_digest(path):
+    digest = hashlib.sha256()
+    with path.open("rb") as image_file:
+        for block in iter(lambda: image_file.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+canonical_digest = None
+if FAT32_WRITE_TEST:
+    if (STORAGE_IMAGE.resolve() == CANONICAL_STORAGE_IMAGE.resolve() or
+            IMAGE.resolve() == STORAGE_IMAGE.resolve() or
+            IMAGE.resolve() == CANONICAL_STORAGE_IMAGE.resolve()):
+        print("qemu smoke test: FAIL")
+        print("FAT32 write test must use separate boot, disposable Test, and canonical paths")
+        sys.exit(1)
+    if CANONICAL_STORAGE_IMAGE.exists():
+        canonical_digest = image_digest(CANONICAL_STORAGE_IMAGE)
+    build = subprocess.run(
+        ["make", "build/linux95-fat32-write-test.img",
+         "prepare-fat32-write-test-image"], cwd=ROOT, check=False)
+    if build.returncode != 0:
+        print("qemu smoke test: FAIL")
+        print("dedicated FAT32 write image/fixture build failed")
+        sys.exit(1)
+    if not STORAGE_IMAGE.is_file():
+        print("qemu smoke test: FAIL")
+        print("disposable FAT32 Test image was not created")
+        sys.exit(1)
+    if subprocess.run(
+            ["mdir", "-i", str(STORAGE_IMAGE), "::WRPROOF"],
+            cwd=ROOT, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            check=False).returncode == 0:
+        print("qemu smoke test: FAIL")
+        print("disposable FAT32 fixture was reused instead of freshly formatted")
+        sys.exit(1)
+    if (canonical_digest is not None and
+            image_digest(CANONICAL_STORAGE_IMAGE) != canonical_digest):
+        print("qemu smoke test: FAIL")
+        print("canonical FAT32 source image changed during fixture preparation")
+        sys.exit(1)
 
 QEMU = shutil.which("qemu-system-x86_64")
 
@@ -176,6 +226,9 @@ saw_completion = False
 completion_seen_at = None
 early_exit = None
 completion_marker = (
+    "[PASS] fat32_write_complete"
+    if FAT32_WRITE_TEST
+    else
     "[PASS] preemptive round robin"
     if PROCESS_PREEMPTION_TEST
     else "[PASS] udp_rx"
@@ -205,6 +258,8 @@ try:
                 "[PASS] icmp_echo_reply",
             ))
             if completion_marker in content and (
+                    not FAT32_WRITE_TEST or
+                    "[PASS] icmp_echo_reply" in content) and (
                     not UDP_NETWORK_TEST or
                     "[PASS] icmp_echo_reply" in content) and (
                     not DNS_NETWORK_TEST or dns_evidence):
@@ -402,6 +457,18 @@ if PROCESS_PREEMPTION_TEST:
 if WITHOUT_USER_PROGRAMS:
     required.append("[WARN] user_processes_offline")
 
+if FAT32_WRITE_TEST:
+    required.extend([
+        "[PASS] fat32_write_touch",
+        "[PASS] fat32_write_readback",
+        "[PASS] fat32_write_mkdir",
+        "[PASS] fat32_write_copy_readback",
+        "[PASS] fat32_write_move_readback",
+        "[PASS] fat32_write_remove",
+        "[PASS] fat32_write_boot_guard",
+        "[PASS] fat32_write_complete",
+    ])
+
 missing = [marker for marker in required if marker not in content]
 
 if missing:
@@ -417,6 +484,46 @@ if missing:
         print("--- qemu stderr ---")
         print(stderr.strip())
     sys.exit(1)
+
+if FAT32_WRITE_TEST:
+    write_markers = required[-8:]
+    positions = [content.find(marker) for marker in write_markers]
+    if (positions != sorted(positions) or
+            any(content.count(marker) != 1 for marker in write_markers) or
+            content.count("[BOOT] low_kernel_entry") != 1 or
+            "#DF" in content or "double fault" in content.lower() or
+            "triple fault" in content.lower() or "reset" in content.lower()):
+        print("qemu smoke test: FAIL")
+        print("FAT32 write proof markers repeated, out of order, or fatal fault occurred")
+        print(content or "(empty)")
+        sys.exit(1)
+    if (canonical_digest is not None and
+            image_digest(CANONICAL_STORAGE_IMAGE) != canonical_digest):
+        print("qemu smoke test: FAIL")
+        print("canonical FAT32 source image changed during QEMU write test")
+        sys.exit(1)
+    with tempfile.TemporaryDirectory() as temp_dir:
+        for name in ("MOVED.BIN", "COPY.BIN"):
+            persisted = Path(temp_dir) / name
+            copy = subprocess.run(
+                ["mcopy", "-i", str(STORAGE_IMAGE),
+                 f"::WRPROOF/{name}", str(persisted)],
+                cwd=ROOT, capture_output=True, text=True, check=False)
+            if (copy.returncode != 0 or not persisted.is_file() or
+                    persisted.read_bytes() != FAT32_WRITE_BYTES):
+                print("qemu smoke test: FAIL")
+                print(f"persisted {name} bytes differ from QEMU write payload")
+                print(copy.stderr.strip())
+                sys.exit(1)
+    for removed in ("::TOUCH.TXT", "::SCRATCH.TXT", "::EMPTY"):
+        if subprocess.run(
+                ["mdir", "-i", str(STORAGE_IMAGE), removed],
+                cwd=ROOT, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                check=False).returncode == 0:
+            print("qemu smoke test: FAIL")
+            print(f"removed Test path still exists: {removed}")
+            sys.exit(1)
+    print("[PASS] FAT32 write persisted on the same disposable Test image")
 
 if UDP_NETWORK_TEST:
     ordered_markers = [

@@ -30,6 +30,9 @@
 #include "filesystem/filesystem_self_test.hpp"
 #include "filesystem/vfs.hpp"
 #include "filesystem/vfs_self_test.hpp"
+#ifdef LINUX95_QEMU_FAT32_WRITE_SELF_TEST
+#include "filesystem/fat32_write_self_test.hpp"
+#endif
 #include "storage/storage_self_test.hpp"
 #include "terminal/shell.hpp"
 #include "terminal/vga.hpp"
@@ -254,6 +257,13 @@ extern "C" [[noreturn]] void linux95_higher_half_entry(
         debug::write("[PANIC] vfs_self_test\n");
         panic::halt("VFS self-test failed");
     }
+
+#ifdef LINUX95_QEMU_FAT32_WRITE_SELF_TEST
+    if (!filesystem::fat32_write_self_test::run()) {
+        debug::write("[PANIC] fat32_write_self_test\n");
+        panic::halt("Writable FAT32 self-test failed");
+    }
+#endif
 
     process::initialize();
     debug::write("[PASS] process subsystem initialized\n");

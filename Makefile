@@ -24,6 +24,8 @@ IMAGE_SECTORS := 273
 STORAGE_TEST_IMAGE := $(BUILD)/linux95-storage-test.img
 FAULT_TEST_IMAGE := $(BUILD)/linux95-fault-test.img
 PREEMPTION_TEST_IMAGE := $(BUILD)/linux95-preemption-test.img
+FAT32_WRITE_TEST_IMAGE := $(BUILD)/linux95-fat32-write-test.img
+FAT32_WRITE_TEST_FAT_IMAGE := $(BUILD)/linux95-fat32-write-test-fat.img
 
 HOST_CXXFLAGS := -std=c++17 -Wall -Wextra -Werror -O2 -Ikernel
 
@@ -112,6 +114,7 @@ UDP_NETWORK_TEST_OBJS := $(subst $(BUILD)/kernel.o,$(BUILD)/kernel-udp-network-t
 UDP_NETWORK_TEST_IMAGE := $(BUILD)/linux95-udp-network-test.img
 DNS_NETWORK_TEST_OBJS := $(subst $(BUILD)/dns.o,$(BUILD)/dns-dns-network-test.o,$(subst $(BUILD)/network.o,$(BUILD)/network-dns-network-test.o,$(subst $(BUILD)/kernel.o,$(BUILD)/kernel-dns-network-test.o,$(KERNEL_OBJS))))
 DNS_NETWORK_TEST_IMAGE := $(BUILD)/linux95-dns-network-test.img
+FAT32_WRITE_TEST_OBJS := $(subst $(BUILD)/fat32_write.o,$(BUILD)/fat32-write-test-writer.o,$(subst $(BUILD)/kernel.o,$(BUILD)/kernel-fat32-write-test.o,$(KERNEL_OBJS))) $(BUILD)/fat32_write_self_test.o
 
 .PHONY: all clean run run-debug test test-qemu prepare-storage-test-image test-host-segments test-host-process test-host-scheduler test-host-user-space test-host-elf test-host-elf-loader-plan test-host-syscall test-host-memory test-host-storage test-host-filesystem test-host-graphics test-host-pci test-host-rtl8139-helpers test-host-kernel-virtual-to-physical test-host-ethernet test-host-arp test-host-ipv4 test-host-icmp test-host-udp test-host-udp-bindings test-host-network-udp test-host-dns-message test-host-dns-response test-host-dns-resolver test-host-heap test-memory-source test-storage-source test-relocations check-tools
 
@@ -248,6 +251,12 @@ $(BUILD)/kernel-dns-network-test.o: \
 	kernel/net/dns.hpp \
 	kernel/filesystem/vfs_self_test.hpp | $(BUILD)
 >$(CXX) $(CXXFLAGS) -DLINUX95_QEMU_NETWORK_SELF_TEST -DLINUX95_QEMU_DNS_SELF_TEST -c $< -o $@
+
+$(BUILD)/kernel-fat32-write-test.o: kernel/kernel.cpp kernel/filesystem/fat32_write_self_test.hpp kernel/filesystem/vfs.hpp | $(BUILD)
+>$(CXX) $(CXXFLAGS) -DLINUX95_QEMU_NETWORK_SELF_TEST -DLINUX95_QEMU_FAT32_WRITE_SELF_TEST -c $< -o $@
+
+$(BUILD)/fat32_write_self_test.o: kernel/filesystem/fat32_write_self_test.cpp kernel/filesystem/fat32_write_self_test.hpp kernel/filesystem/vfs.hpp kernel/storage/disk.hpp | $(BUILD)
+>$(CXX) $(CXXFLAGS) -c $< -o $@
 
 $(BUILD)/renderer.o: kernel/graphics/renderer.cpp kernel/graphics/renderer.hpp kernel/graphics/font8x8.hpp kernel/graphics/framebuffer.hpp | $(BUILD)
 >$(CXX) $(CXXFLAGS) -c $< -o $@
@@ -570,6 +579,9 @@ $(BUILD)/fat32.o: kernel/filesystem/fat32.cpp kernel/filesystem/fat32.hpp kernel
 $(BUILD)/fat32_write.o: kernel/filesystem/fat32_write.cpp kernel/filesystem/fat32_write.hpp kernel/filesystem/fat32.hpp kernel/filesystem/fat32_helpers.hpp kernel/filesystem/filesystem.hpp kernel/filesystem/vfs.hpp kernel/storage/disk.hpp | $(BUILD)
 >$(CXX) $(CXXFLAGS) -c $< -o $@
 
+$(BUILD)/fat32-write-test-writer.o: kernel/filesystem/fat32_write.cpp kernel/filesystem/fat32_write.hpp kernel/filesystem/fat32.hpp kernel/filesystem/fat32_helpers.hpp kernel/filesystem/filesystem.hpp kernel/filesystem/vfs.hpp kernel/storage/disk.hpp | $(BUILD)
+>$(CXX) $(CXXFLAGS) -Os -c $< -o $@
+
 $(BUILD)/filesystem.o: kernel/filesystem/filesystem.cpp kernel/filesystem/filesystem.hpp kernel/filesystem/fat32.hpp kernel/filesystem/fat32_write.hpp | $(BUILD)
 >$(CXX) $(CXXFLAGS) -c $< -o $@
 
@@ -669,6 +681,17 @@ $(BUILD)/kernel-dns-network-test.bin: $(BUILD)/kernel-dns-network-test.elf
 	max=$$(( $(KERNEL_SECTORS) * $(SECTOR) )); \
 	test $$size -le $$max || { echo "ERROR: DNS-test kernel too large: $$size > $$max"; exit 1; }
 
+$(BUILD)/kernel-fat32-write-test.elf: $(FAT32_WRITE_TEST_OBJS) linker.ld
+>$(LD) -nostdlib -z max-page-size=0x1000 -T linker.ld -o $@ $(FAT32_WRITE_TEST_OBJS)
+>@entry=$$($(READELF) -h $@ | awk '/Entry point address:/ {print $$4}'); \
+	test "$$entry" = "0x100000" || { echo "ERROR: bad FAT32-write kernel entry: $$entry"; exit 1; }
+
+$(BUILD)/kernel-fat32-write-test.bin: $(BUILD)/kernel-fat32-write-test.elf
+>$(OBJCOPY) -O binary $< $@
+>@size=$$(stat -c%s $@); \
+	max=$$(( $(KERNEL_SECTORS) * $(SECTOR) )); \
+	test $$size -le $$max || { echo "ERROR: FAT32-write kernel too large: $$size > $$max"; exit 1; }
+
 $(BUILD)/linux95-kernel.img: \
 	$(BUILD)/stage1.bin \
 	$(BUILD)/stage2.bin \
@@ -708,6 +731,12 @@ $(DNS_NETWORK_TEST_IMAGE): \
 >dd if=$(BUILD)/stage2.bin of=$@ bs=$(SECTOR) seek=1 conv=notrunc status=none
 >dd if=$(BUILD)/kernel-dns-network-test.bin of=$@ bs=$(SECTOR) seek=$(KERNEL_LBA) conv=notrunc status=none
 
+$(FAT32_WRITE_TEST_IMAGE): $(BUILD)/stage1.bin $(BUILD)/stage2.bin $(BUILD)/kernel-fat32-write-test.bin
+>dd if=/dev/zero of=$@ bs=$(SECTOR) count=$(IMAGE_SECTORS) status=none
+>dd if=$(BUILD)/stage1.bin of=$@ bs=$(SECTOR) seek=0 conv=notrunc status=none
+>dd if=$(BUILD)/stage2.bin of=$@ bs=$(SECTOR) seek=1 conv=notrunc status=none
+>dd if=$(BUILD)/kernel-fat32-write-test.bin of=$@ bs=$(SECTOR) seek=$(KERNEL_LBA) conv=notrunc status=none
+
 $(STORAGE_TEST_IMAGE): tests/prepare_fat32_image.py $(BUILD)/user/init.elf $(BUILD)/user/worker.elf | $(BUILD)
 >@for tool in mkfs.fat mmd mcopy; do \
 	command -v $$tool >/dev/null || { echo "Missing tool: $$tool"; exit 1; }; \
@@ -721,6 +750,10 @@ $(PREEMPTION_TEST_IMAGE): tests/prepare_fat32_image.py $(BUILD)/user/preempt_hog
 >$(PYTHON) tests/prepare_fat32_image.py $@ --process-preemption
 
 prepare-storage-test-image: $(STORAGE_TEST_IMAGE)
+
+.PHONY: prepare-fat32-write-test-image
+prepare-fat32-write-test-image: $(BUILD)/user/init.elf $(BUILD)/user/worker.elf | $(BUILD)
+>$(PYTHON) tests/prepare_fat32_image.py $(FAT32_WRITE_TEST_FAT_IMAGE) --fat32-write
 
 test-memory-source:
 >$(PYTHON) tests/memory_source_checks.py

@@ -13,21 +13,26 @@ def run(command):
 def main():
     process_fault = "--process-fault" in sys.argv[2:]
     process_preemption = "--process-preemption" in sys.argv[2:]
+    fat32_write = "--fat32-write" in sys.argv[2:]
 
-    if process_fault and process_preemption:
-        print("process fixture modes are mutually exclusive")
+    if sum((process_fault, process_preemption, fat32_write)) > 1:
+        print("FAT32 fixture modes are mutually exclusive")
         return 2
 
     if len(sys.argv) not in (2, 3) or any(
-            argument not in ("--process-fault", "--process-preemption")
+            argument not in ("--process-fault", "--process-preemption",
+                             "--fat32-write")
             for argument in sys.argv[2:]):
         print(
             "usage: prepare_fat32_image.py <output-image> "
-            "[--process-fault|--process-preemption]"
+            "[--process-fault|--process-preemption|--fat32-write]"
         )
         return 2
 
     image = Path(sys.argv[1]).resolve()
+    if fat32_write and image == Path("build/linux95-storage-test.img").resolve():
+        print("writable proof fixture cannot replace canonical Test image")
+        return 2
     user_init = Path("build/user/init.elf").resolve()
     user_worker = Path("build/user/worker.elf").resolve()
     user_fault = Path("build/user/fault.elf").resolve()
