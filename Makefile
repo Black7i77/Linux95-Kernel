@@ -116,9 +116,9 @@ DNS_NETWORK_TEST_OBJS := $(subst $(BUILD)/dns.o,$(BUILD)/dns-dns-network-test.o,
 DNS_NETWORK_TEST_IMAGE := $(BUILD)/linux95-dns-network-test.img
 FAT32_WRITE_TEST_OBJS := $(subst $(BUILD)/fat32_write.o,$(BUILD)/fat32-write-test-writer.o,$(subst $(BUILD)/kernel.o,$(BUILD)/kernel-fat32-write-test.o,$(KERNEL_OBJS))) $(BUILD)/fat32_write_self_test.o
 
-.PHONY: all clean run run-debug test test-qemu prepare-storage-test-image test-host-keyboard test-host-terminal-key-event test-host-segments test-host-process test-host-scheduler test-host-user-space test-host-elf test-host-elf-loader-plan test-host-syscall test-host-memory test-host-storage test-host-filesystem test-host-graphics test-host-pci test-host-rtl8139-helpers test-host-kernel-virtual-to-physical test-host-ethernet test-host-arp test-host-ipv4 test-host-icmp test-host-udp test-host-udp-bindings test-host-network-udp test-host-dns-message test-host-dns-response test-host-dns-resolver test-host-heap test-memory-source test-storage-source test-relocations check-tools
+.PHONY: all clean run run-debug test test-qemu prepare-storage-test-image test-host-keyboard test-host-terminal-key-event test-host-editor-model test-host-segments test-host-process test-host-scheduler test-host-user-space test-host-elf test-host-elf-loader-plan test-host-syscall test-host-memory test-host-storage test-host-filesystem test-host-graphics test-host-pci test-host-rtl8139-helpers test-host-kernel-virtual-to-physical test-host-ethernet test-host-arp test-host-ipv4 test-host-icmp test-host-udp test-host-udp-bindings test-host-network-udp test-host-dns-message test-host-dns-response test-host-dns-resolver test-host-heap test-memory-source test-storage-source test-relocations check-tools
 
-all: check-tools $(BUILD)/linux95-kernel.img $(BUILD)/user/init.elf $(BUILD)/user/worker.elf
+all: check-tools $(BUILD)/linux95-kernel.img $(BUILD)/user/init.elf $(BUILD)/user/worker.elf $(BUILD)/editor_model.o
 
 check-tools:
 >@for tool in $(NASM) $(CXX) $(LD) $(OBJCOPY) $(READELF) $(PYTHON); do \
@@ -264,6 +264,9 @@ $(BUILD)/renderer.o: kernel/graphics/renderer.cpp kernel/graphics/renderer.hpp k
 $(BUILD)/terminal_model.o: kernel/gui/terminal_model.cpp kernel/gui/terminal_model.hpp kernel/terminal/output.hpp | $(BUILD)
 >$(CXX) $(CXXFLAGS) -c $< -o $@
 
+$(BUILD)/editor_model.o: kernel/gui/editor_model.cpp kernel/gui/editor_model.hpp kernel/filesystem/vfs.hpp kernel/filesystem/filesystem.hpp | $(BUILD)
+>$(CXX) $(CXXFLAGS) -c $< -o $@
+
 $(BUILD)/terminal_app.o: kernel/gui/terminal_app.cpp kernel/gui/terminal_app.hpp kernel/gui/app.hpp kernel/gui/terminal_model.hpp kernel/terminal/shell_session.hpp kernel/terminal/shell.hpp kernel/graphics/renderer.hpp kernel/net/network.hpp kernel/net/dns.hpp | $(BUILD)
 >$(CXX) $(CXXFLAGS) -c $< -o $@
 
@@ -300,7 +303,7 @@ $(BUILD)/pic.o: kernel/arch/pic.cpp kernel/arch/pic.hpp | $(BUILD)
 $(BUILD)/pit.o: kernel/arch/pit.cpp kernel/arch/pit.hpp | $(BUILD)
 >$(CXX) $(CXXFLAGS) -c $< -o $@
 
-$(BUILD)/keyboard.o: kernel/arch/keyboard.cpp kernel/arch/keyboard.hpp | $(BUILD)
+$(BUILD)/keyboard.o: kernel/arch/keyboard.cpp kernel/arch/keyboard.hpp kernel/arch/keyboard_helpers.hpp | $(BUILD)
 >$(CXX) $(CXXFLAGS) -c $< -o $@
 
 $(BUILD)/ps2.o: kernel/arch/ps2.cpp kernel/arch/ps2.hpp kernel/arch/io.hpp | $(BUILD)
@@ -867,7 +870,7 @@ test-host-terminal-model: $(BUILD)/host-terminal-model-test
 
 test-host-graphics: test-host-terminal-model
 
-$(BUILD)/host-keyboard-test: tests/host/keyboard_test.cpp | $(BUILD)
+$(BUILD)/host-keyboard-test: tests/host/keyboard_test.cpp kernel/arch/keyboard.hpp kernel/arch/keyboard_helpers.hpp | $(BUILD)
 >$(CXX) $(HOST_CXXFLAGS) $< -o $@
 
 test-host-keyboard: $(BUILD)/host-keyboard-test
@@ -882,3 +885,11 @@ test-host-terminal-key-event: $(BUILD)/host-terminal-key-event-test
 >$(BUILD)/host-terminal-key-event-test
 
 test-host-graphics: test-host-terminal-key-event
+
+$(BUILD)/host-editor-model-test: tests/host/editor_model_test.cpp kernel/gui/editor_model.hpp kernel/gui/editor_model.cpp | $(BUILD)
+>$(CXX) $(HOST_CXXFLAGS) $< kernel/gui/editor_model.cpp -o $@
+
+test-host-editor-model: $(BUILD)/host-editor-model-test
+>$(BUILD)/host-editor-model-test
+
+test-host-graphics: test-host-editor-model
