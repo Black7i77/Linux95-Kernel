@@ -619,7 +619,47 @@ void test_move_failures() {
     assert(memcmp(saved_fat, fat, sizeof fat) == 0);
 }
 
+void test_free_chain_mirror_mismatch_preserves_chain() {
+    using namespace linux95::filesystem;
+    using namespace linux95::filesystem::fat32;
+
+    reset(); mounted();
+    put32(fat[0], 24, 0x10000007u); put32(fat[1], 24, 0x20000007u);
+    put32(fat[0], 28, 0x3fffffffu); put32(fat[1], 28, 0x4fffffffu);
+    put32(fat[1], 28, 0x40000008u); // only the later mirrored link disagrees
+    const uint32_t before[2][2] = {
+        {get32(fat[0], 24), get32(fat[0], 28)},
+        {get32(fat[1], 24), get32(fat[1], 28)}
+    };
+    const uint32_t before_writes = writes;
+    const uint32_t before_attempts = write_attempt_count();
+    assert(write::free_chain(6) == Status::Corrupt);
+    assert(writes == before_writes && write_attempt_count() == before_attempts);
+    for (uint32_t copy = 0; copy < 2; ++copy) {
+        assert(get32(fat[copy], 24) == before[copy][0]);
+        assert(get32(fat[copy], 28) == before[copy][1]);
+    }
+}
+
+void test_allocate_later_eoc_write_failure_clears_output() {
+    using namespace linux95::filesystem;
+    using namespace linux95::filesystem::fat32;
+
+    reset(); mounted();
+    put32(fat[0], 24, 0x10000000u); put32(fat[1], 24, 0x20000000u);
+    put32(fat[0], 28, 0x30000000u); put32(fat[1], 28, 0x40000000u);
+    fail_write_on(4, 1042); // secondary copy of candidate 7's EOC
+    uint32_t first_cluster = 123;
+    assert(write::allocate_chain(2, first_cluster) == Status::IoError);
+    assert(first_cluster == 0);
+    assert(get32(fat[0], 24) == 0x10000000u && get32(fat[1], 24) == 0x20000000u);
+    assert(get32(fat[0], 28) == 0x30000000u && get32(fat[1], 28) == 0x40000000u);
+    assert(write_attempt_count() == 7 && writes == 6);
+}
+
 int main() {
+    test_free_chain_mirror_mismatch_preserves_chain();
+    test_allocate_later_eoc_write_failure_clears_output();
     using namespace linux95;
     using namespace filesystem;
     using namespace filesystem::fat32;

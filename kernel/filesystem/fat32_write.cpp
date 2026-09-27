@@ -982,16 +982,18 @@ Status allocate_chain(uint32_t clusters, uint32_t& first_cluster)
         uint32_t value = 0;
         Status status = read_fat_entry(candidate, value);
         if (status != Status::Ok) {
-            if (first_cluster != 0 && free_chain(first_cluster) != Status::Ok)
-                return Status::IoError;
-            return status;
+            const Status cleanup = first_cluster != 0
+                ? free_chain(first_cluster) : Status::Ok;
+            first_cluster = 0;
+            return cleanup == Status::Ok ? status : Status::IoError;
         }
         if (value != 0) continue;
         status = write_fat_entry(candidate, 0x0fffffffu);
         if (status != Status::Ok) {
-            if (first_cluster != 0 && free_chain(first_cluster) != Status::Ok)
-                return Status::IoError;
-            return status;
+            const Status cleanup = first_cluster != 0
+                ? free_chain(first_cluster) : Status::Ok;
+            first_cluster = 0;
+            return cleanup == Status::Ok ? status : Status::IoError;
         }
         if (previous != 0) {
             status = write_fat_entry(previous, candidate);
@@ -1009,10 +1011,10 @@ Status allocate_chain(uint32_t clusters, uint32_t& first_cluster)
         ++found;
     }
     if (found == clusters) return Status::Ok;
-    if (first_cluster != 0 && free_chain(first_cluster) != Status::Ok)
-        return Status::IoError;
+    const Status cleanup = first_cluster != 0
+        ? free_chain(first_cluster) : Status::Ok;
     first_cluster = 0;
-    return Status::NoSpace;
+    return cleanup == Status::Ok ? Status::NoSpace : Status::IoError;
 }
 
 Status free_chain(uint32_t first_cluster)
@@ -1029,7 +1031,7 @@ Status free_chain(uint32_t first_cluster)
     for (uint32_t walked = 0; walked < g.cluster_count; ++walked) {
         uint32_t next = 0;
         bool end = false;
-        const Status status = chain_next(g, cluster, next, end);
+        const Status status = chain_next(g, cluster, next, end, true);
         if (status != Status::Ok) return status;
         if (end) { terminated = true; break; }
         cluster = next;
