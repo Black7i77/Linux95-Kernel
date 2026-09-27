@@ -25,6 +25,9 @@ EditorModel::EditorModel(uint8_t* storage, size_t capacity)
       status_{},
       length_(0),
       cursor_(0),
+      desired_column_(0),
+      viewport_top_line_(0),
+      viewport_left_column_(0),
       file_exists_(false),
       modified_(false),
       initialized_(false)
@@ -54,9 +57,13 @@ bool EditorModel::initialize(
     status_[0] = '\0';
     length_ = length;
     cursor_ = length;
+    desired_column_ = 0;
+    viewport_top_line_ = 0;
+    viewport_left_column_ = 0;
     file_exists_ = file_exists;
     modified_ = false;
     initialized_ = true;
+    reset_desired_column();
     return true;
 }
 
@@ -69,6 +76,7 @@ bool EditorModel::insert(uint8_t byte)
     storage_[cursor_++] = byte;
     ++length_;
     modified_ = true;
+    reset_desired_column();
     return true;
 }
 
@@ -79,6 +87,7 @@ bool EditorModel::insert_newline()
     storage_[cursor_++] = '\n';
     ++length_;
     modified_ = true;
+    reset_desired_column();
     return true;
 }
 
@@ -90,13 +99,145 @@ bool EditorModel::backspace()
     --cursor_;
     --length_;
     modified_ = true;
+    reset_desired_column();
     return true;
 }
 
 void EditorModel::move_left()
 {
     if (initialized_ && cursor_ != 0) --cursor_;
+    reset_desired_column();
 }
+
+void EditorModel::move_right()
+{
+    if (initialized_ && cursor_ < length_) ++cursor_;
+    reset_desired_column();
+}
+
+size_t EditorModel::line_count() const
+{
+    size_t lines = 1;
+    for (size_t i = 0; i < length_; ++i) {
+        if (storage_[i] == '\n') ++lines;
+    }
+    return lines;
+}
+
+bool EditorModel::line_bounds(size_t requested, size_t& begin, size_t& end) const
+{
+    if (!initialized_ || requested >= line_count()) return false;
+    size_t line = 0;
+    size_t start = 0;
+    for (size_t i = 0; i < length_; ++i) {
+        if (storage_[i] != '\n') continue;
+        if (line == requested) {
+            begin = start;
+            end = i;
+            return true;
+        }
+        ++line;
+        start = i + 1;
+    }
+    begin = start;
+    end = length_;
+    return line == requested;
+}
+
+void EditorModel::cursor_location(size_t& line, size_t& column) const
+{
+    line = 0;
+    column = 0;
+    for (size_t i = 0; i < cursor_; ++i) {
+        if (storage_[i] == '\n') {
+            ++line;
+            column = 0;
+        } else {
+            ++column;
+        }
+    }
+}
+
+void EditorModel::reset_desired_column()
+{
+    size_t line = 0;
+    cursor_location(line, desired_column_);
+    static_cast<void>(line);
+}
+
+void EditorModel::move_up()
+{
+    if (!initialized_) return;
+    size_t line = 0;
+    size_t ignored_column = 0;
+    cursor_location(line, ignored_column);
+    if (line == 0) return;
+    size_t begin = 0;
+    size_t end = 0;
+    if (!line_bounds(line - 1, begin, end)) return;
+    const size_t target_column = desired_column_ < end - begin
+        ? desired_column_ : end - begin;
+    cursor_ = begin + target_column;
+}
+
+void EditorModel::move_down()
+{
+    if (!initialized_) return;
+    size_t line = 0;
+    size_t ignored_column = 0;
+    cursor_location(line, ignored_column);
+    if (line + 1 >= line_count()) return;
+    size_t begin = 0;
+    size_t end = 0;
+    if (!line_bounds(line + 1, begin, end)) return;
+    const size_t target_column = desired_column_ < end - begin
+        ? desired_column_ : end - begin;
+    cursor_ = begin + target_column;
+}
+
+void EditorModel::update_viewport(size_t visible_rows, size_t visible_columns)
+{
+    if (!initialized_ || visible_rows == 0 || visible_columns == 0) return;
+    size_t line = 0;
+    size_t column = 0;
+    cursor_location(line, column);
+
+    if (line < viewport_top_line_) {
+        viewport_top_line_ = line;
+    } else if (line - viewport_top_line_ >= visible_rows) {
+        viewport_top_line_ = line - visible_rows + 1;
+    }
+    const size_t lines = line_count();
+    const size_t max_top = lines > visible_rows ? lines - visible_rows : 0;
+    if (viewport_top_line_ > max_top) viewport_top_line_ = max_top;
+
+    if (column < viewport_left_column_) {
+        viewport_left_column_ = column;
+    } else if (column - viewport_left_column_ >= visible_columns) {
+        viewport_left_column_ = column - visible_columns + 1;
+    }
+}
+
+size_t EditorModel::line_number() const
+{
+    size_t line = 0;
+    size_t column = 0;
+    cursor_location(line, column);
+    static_cast<void>(column);
+    return line + 1;
+}
+
+size_t EditorModel::column_number() const
+{
+    size_t line = 0;
+    size_t column = 0;
+    cursor_location(line, column);
+    static_cast<void>(line);
+    return column + 1;
+}
+
+size_t EditorModel::viewport_top_line() const { return viewport_top_line_; }
+size_t EditorModel::viewport_left_column() const { return viewport_left_column_; }
 
 size_t EditorModel::length() const { return length_; }
 size_t EditorModel::cursor() const { return cursor_; }
