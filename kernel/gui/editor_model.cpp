@@ -67,6 +67,20 @@ bool EditorModel::initialize(
     return true;
 }
 
+bool EditorModel::initialize_from_storage(
+    const char* path,
+    size_t length,
+    bool file_exists)
+{
+    return initialize(path, storage_, length, file_exists);
+}
+
+uint8_t* EditorModel::load_buffer()
+{
+    return storage_ != nullptr && capacity_ >= kTextCapacity
+        ? storage_ : nullptr;
+}
+
 bool EditorModel::insert(uint8_t byte)
 {
     if (!initialized_ || byte < 0x20 || byte > 0x7E || length_ >= kTextCapacity) {

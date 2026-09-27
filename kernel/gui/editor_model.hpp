@@ -16,6 +16,8 @@ public:
     EditorModel(uint8_t* storage, size_t capacity);
 
     bool initialize(const char* path, const uint8_t* data, size_t length, bool file_exists);
+    bool initialize_from_storage(const char* path, size_t length, bool file_exists);
+    uint8_t* load_buffer();
     bool insert(uint8_t byte);
     bool insert_newline();
     bool backspace();
