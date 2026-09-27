@@ -48,6 +48,8 @@ using EntryVisitor = bool (*)(
 
 bool initialize();
 
+Status validate_name(const char* name);
+
 Status list_directory(
     const char* path,
     EntryVisitor visitor,

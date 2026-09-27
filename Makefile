@@ -559,6 +559,9 @@ $(BUILD)/host-vfs-test: \
 	kernel/filesystem/filesystem.hpp | $(BUILD)
 >$(CXX) $(HOST_CXXFLAGS) tests/host/vfs_test.cpp kernel/filesystem/vfs.cpp -o $@
 
+$(BUILD)/host-vfs-name-test: tests/host/vfs_name_test.cpp kernel/filesystem/filesystem.cpp kernel/filesystem/filesystem.hpp kernel/filesystem/vfs.cpp kernel/filesystem/vfs.hpp kernel/filesystem/fat32.cpp kernel/filesystem/fat32.hpp kernel/filesystem/fat32_helpers.hpp kernel/filesystem/fat32_write.cpp kernel/filesystem/fat32_write.hpp kernel/storage/disk.cpp kernel/storage/disk.hpp kernel/storage/ata.hpp | $(BUILD)
+>$(CXX) $(HOST_CXXFLAGS) tests/host/vfs_name_test.cpp kernel/filesystem/filesystem.cpp kernel/filesystem/vfs.cpp kernel/filesystem/fat32.cpp kernel/filesystem/fat32_write.cpp kernel/storage/disk.cpp -o $@
+
 $(BUILD)/host-filesystem-write-test: tests/host/filesystem_write_test.cpp kernel/filesystem/filesystem.cpp kernel/filesystem/filesystem.hpp kernel/filesystem/vfs.cpp kernel/filesystem/vfs.hpp kernel/filesystem/fat32.hpp kernel/filesystem/fat32_write.hpp kernel/storage/disk.cpp kernel/storage/disk.hpp | $(BUILD)
 >$(CXX) $(HOST_CXXFLAGS) tests/host/filesystem_write_test.cpp kernel/filesystem/filesystem.cpp kernel/filesystem/vfs.cpp kernel/storage/disk.cpp -o $@
 
@@ -571,10 +574,11 @@ $(BUILD)/host-framebuffer-helpers-test: tests/host/framebuffer_helpers_test.cpp 
 test-host-graphics: $(BUILD)/host-framebuffer-helpers-test
 >$(BUILD)/host-framebuffer-helpers-test
 
-test-host-filesystem: $(BUILD)/host-fat32-helpers-test $(BUILD)/host-fat32-mount-test $(BUILD)/host-vfs-test $(BUILD)/host-fat32-write-test $(BUILD)/host-filesystem-write-test $(BUILD)/host-filesystem-command-test
+test-host-filesystem: $(BUILD)/host-fat32-helpers-test $(BUILD)/host-fat32-mount-test $(BUILD)/host-vfs-test $(BUILD)/host-vfs-name-test $(BUILD)/host-fat32-write-test $(BUILD)/host-filesystem-write-test $(BUILD)/host-filesystem-command-test
 >$(BUILD)/host-fat32-helpers-test
 >$(BUILD)/host-fat32-mount-test
 >$(BUILD)/host-vfs-test
+>$(BUILD)/host-vfs-name-test
 >$(BUILD)/host-fat32-write-test
 >$(BUILD)/host-filesystem-write-test
 >$(BUILD)/host-filesystem-command-test

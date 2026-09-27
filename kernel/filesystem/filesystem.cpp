@@ -1,6 +1,7 @@
 #include "filesystem/filesystem.hpp"
 
 #include "filesystem/fat32.hpp"
+#include "filesystem/fat32_helpers.hpp"
 #include "filesystem/fat32_write.hpp"
 
 namespace linux95::filesystem {
@@ -23,6 +24,22 @@ bool initialize()
 
     current_volume = mounted_volume;
     return true;
+}
+
+Status validate_name(const char* name)
+{
+    if (name == nullptr) {
+        return Status::InvalidName;
+    }
+
+    size_t length = 0;
+    while (name[length] != '\0') {
+        ++length;
+    }
+
+    return fat32::helpers::valid_path_component(name, length)
+        ? Status::Ok
+        : Status::InvalidName;
 }
 
 Status list_directory(

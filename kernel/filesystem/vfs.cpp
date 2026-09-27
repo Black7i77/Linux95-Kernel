@@ -90,6 +90,11 @@ void initialize()
     }
 }
 
+Status validate_name(const char* name)
+{
+    return ::linux95::filesystem::validate_name(name);
+}
+
 Status stat(
     const char* path,
     FileStat& info)
