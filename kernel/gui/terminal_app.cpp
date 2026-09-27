@@ -77,12 +77,12 @@ net::dns::Status dns_set_server(void*, const net::Ipv4Address& address)
     return net::dns::set_server(address);
 }
 
-void execute_shell_command(
+shell::CommandResult execute_shell_command(
     void*,
     terminal::Output& output,
     char* command)
 {
-    shell::execute_command(
+    return shell::execute_command(
         output,
         command);
 }

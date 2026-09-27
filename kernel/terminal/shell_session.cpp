@@ -287,13 +287,14 @@ void ShellSession::begin()
     prompt();
 }
 
-void ShellSession::on_char(char c)
+shell::CommandResult ShellSession::on_char(char c)
 {
     if (dns_pending_) {
-        return;
+        return shell::CommandResult{};
     }
 
     if (c == '\n') {
+        shell::CommandResult result{};
         if (output_.put_char != nullptr) {
             output_.put_char(
                 output_.context,
@@ -304,7 +305,7 @@ void ShellSession::on_char(char c)
 
         if (!execute_network_command() &&
             !execute_dns_command() && execute_ != nullptr) {
-            execute_(
+            result = execute_(
                 execute_context_,
                 output_,
                 command_);
@@ -316,12 +317,12 @@ void ShellSession::on_char(char c)
         if (!dns_pending_) {
             prompt();
         }
-        return;
+        return result;
     }
 
     if (c == '\b') {
         if (length_ == 0) {
-            return;
+            return shell::CommandResult{};
         }
 
         --length_;
@@ -333,16 +334,16 @@ void ShellSession::on_char(char c)
                 '\b');
         }
 
-        return;
+        return shell::CommandResult{};
     }
 
     if (c < 32 ||
         c > 126) {
-        return;
+        return shell::CommandResult{};
     }
 
     if (length_ + 1 >= kCommandCapacity) {
-        return;
+        return shell::CommandResult{};
     }
 
     command_[length_] = c;
@@ -354,6 +355,7 @@ void ShellSession::on_char(char c)
             output_.context,
             c);
     }
+    return shell::CommandResult{};
 }
 
 bool ShellSession::poll()

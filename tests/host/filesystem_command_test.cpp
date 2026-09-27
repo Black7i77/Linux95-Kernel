@@ -75,9 +75,11 @@ void expect_call(const char* operation, const char* first, const char* second,
     assert(strcmp(display.text, message) == 0);
 }
 
-void dispatch(void*, linux95::terminal::Output& out, char* command)
+linux95::shell::CommandResult dispatch(
+    void*, linux95::terminal::Output& out, char* command)
 {
     assert(linux95::terminal::execute_filesystem_command(out, command));
+    return {};
 }
 
 void test_recognition_and_usage()

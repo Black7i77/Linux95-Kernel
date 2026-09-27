@@ -2,6 +2,7 @@
 
 #include "net/network.hpp"
 #include "net/dns.hpp"
+#include "terminal/shell.hpp"
 #include "terminal/output.hpp"
 
 #include <stddef.h>
@@ -13,7 +14,7 @@ bool parse_ipv4(
     net::Ipv4Address& out);
 
 using ExecuteCallback =
-    void (*)(
+    shell::CommandResult (*)(
         void* context,
         Output& output,
         char* command);
@@ -48,7 +49,7 @@ public:
         const DnsCallbacks* dns_callbacks = nullptr);
 
     void begin();
-    void on_char(char c);
+    shell::CommandResult on_char(char c);
     bool poll();
 
 private:

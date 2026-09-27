@@ -1,4 +1,5 @@
 #include "terminal/shell.hpp"
+#include "terminal/shell_edit.hpp"
 #include "terminal/key_event_adapter.hpp"
 
 #include "arch/io.hpp"
@@ -88,6 +89,7 @@ void print_help(terminal::Output& output)
     terminal::write(output, "  fsinfo   Show FAT32 filesystem information\n");
     terminal::write(output, "  ls [path] List FAT32 directory\n");
     terminal::write(output, "  cat <path> Read FAT32 file\n");
+    terminal::write(output, "  edit <path> Open the terminal text editor\n");
     terminal::write(output, "  touch <path> Create a file if absent\n");
     terminal::write(output, "  mkdir <path> Create a directory\n");
     terminal::write(output, "  write <path> <data> Replace file contents\n");
@@ -438,51 +440,74 @@ void reboot(terminal::Output& output)
 
 } // namespace
 
-void execute_command(
+CommandResult execute_command(
     terminal::Output& output,
     char* command)
 {
     if (terminal::execute_filesystem_command(output, command)) {
-        return;
+        return CommandResult{};
     }
 
     ParsedCommand parsed =
         parse_command(command);
 
     if (parsed.name[0] == '\0') {
-        return;
+        return CommandResult{};
     }
 
-    if (equals(parsed.name, "help")) { print_help(output); return; }
+    if (equals(parsed.name, "edit")) {
+        char path[filesystem::vfs::kPathCapacity]{};
+        const EditArgumentStatus status =
+            parse_edit_argument(parsed.argument, path);
+        if (status == EditArgumentStatus::Missing ||
+            status == EditArgumentStatus::Extra) {
+            terminal::write(output, "Usage: edit <path>\n");
+            return CommandResult{};
+        }
+        if (status == EditArgumentStatus::TooLong) {
+            terminal::write(output, "edit: path too long\n");
+            return CommandResult{};
+        }
+
+        CommandResult result{};
+        result.action = CommandAction::OpenEditor;
+        for (size_t i = 0; i < sizeof(result.path) && path[i] != '\0'; ++i) {
+            result.path[i] = path[i];
+        }
+        return result;
+    }
+
+    if (equals(parsed.name, "help")) { print_help(output); return CommandResult{}; }
     if (equals(parsed.name, "clear")) {
         output.clear(output.context);
-        return;
+        return CommandResult{};
     }
-    if (equals(parsed.name, "version")) { print_version(output); return; }
-    if (equals(parsed.name, "mem")) { print_memory(output); return; }
-    if (equals(parsed.name, "diskinfo")) { print_diskinfo(output); return; }
-    if (equals(parsed.name, "fsinfo")) { print_fsinfo(output); return; }
+    if (equals(parsed.name, "version")) { print_version(output); return CommandResult{}; }
+    if (equals(parsed.name, "mem")) { print_memory(output); return CommandResult{}; }
+    if (equals(parsed.name, "diskinfo")) { print_diskinfo(output); return CommandResult{}; }
+    if (equals(parsed.name, "fsinfo")) { print_fsinfo(output); return CommandResult{}; }
     if (equals(parsed.name, "ls")) {
         print_ls(output, parsed.argument);
-        return;
+        return CommandResult{};
     }
 
     if (equals(parsed.name, "cat")) {
         print_cat(output, parsed.argument);
-        return;
+        return CommandResult{};
     }
 
     if (equals(parsed.name, "uptime")) {
         terminal::write(output, "Uptime: ");
         terminal::write_uint(output, pit::uptime_seconds());
         terminal::write(output, " seconds\n");
-        return;
+        return CommandResult{};
     }
-    if (equals(parsed.name, "reboot")) { reboot(output); return; }
+    if (equals(parsed.name, "reboot")) { reboot(output); return CommandResult{}; }
 
     terminal::write(output, "Unknown command: ");
     terminal::write(output, parsed.name);
     terminal::write(output, "\nType 'help' for commands.\n");
+    return CommandResult{};
 }
 
 
@@ -538,14 +563,15 @@ net::dns::Status dns_set_server(void*, const net::Ipv4Address& address)
     return net::dns::set_server(address);
 }
 
-void execute_session_command(
+CommandResult execute_session_command(
     void*,
     terminal::Output& output,
     char* command)
 {
-    execute_command(
+    const CommandResult result = execute_command(
         output,
         command);
+    return report_editor_unavailable(output, result);
 }
 
 } // namespace

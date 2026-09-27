@@ -106,6 +106,7 @@ KERNEL_OBJS := \
 	$(BUILD)/filesystem_self_test.o \
 	$(BUILD)/vfs_self_test.o \
 	$(BUILD)/shell.o \
+	$(BUILD)/shell_edit.o \
 	$(BUILD)/filesystem_commands.o
 
 NETWORK_TEST_OBJS := $(subst $(BUILD)/kernel.o,$(BUILD)/kernel-network-test.o,$(KERNEL_OBJS))
@@ -116,7 +117,7 @@ DNS_NETWORK_TEST_OBJS := $(subst $(BUILD)/dns.o,$(BUILD)/dns-dns-network-test.o,
 DNS_NETWORK_TEST_IMAGE := $(BUILD)/linux95-dns-network-test.img
 FAT32_WRITE_TEST_OBJS := $(subst $(BUILD)/fat32_write.o,$(BUILD)/fat32-write-test-writer.o,$(subst $(BUILD)/kernel.o,$(BUILD)/kernel-fat32-write-test.o,$(KERNEL_OBJS))) $(BUILD)/fat32_write_self_test.o
 
-.PHONY: all clean run run-debug test test-qemu prepare-storage-test-image test-host-keyboard test-host-terminal-key-event test-host-editor-model test-host-segments test-host-process test-host-scheduler test-host-user-space test-host-elf test-host-elf-loader-plan test-host-syscall test-host-memory test-host-storage test-host-filesystem test-host-graphics test-host-pci test-host-rtl8139-helpers test-host-kernel-virtual-to-physical test-host-ethernet test-host-arp test-host-ipv4 test-host-icmp test-host-udp test-host-udp-bindings test-host-network-udp test-host-dns-message test-host-dns-response test-host-dns-resolver test-host-heap test-memory-source test-storage-source test-relocations check-tools
+.PHONY: all clean run run-debug test test-qemu prepare-storage-test-image test-host-keyboard test-host-terminal-key-event test-host-editor-model test-host-shell-edit test-host-segments test-host-process test-host-scheduler test-host-user-space test-host-elf test-host-elf-loader-plan test-host-syscall test-host-memory test-host-storage test-host-filesystem test-host-graphics test-host-pci test-host-rtl8139-helpers test-host-kernel-virtual-to-physical test-host-ethernet test-host-arp test-host-ipv4 test-host-icmp test-host-udp test-host-udp-bindings test-host-network-udp test-host-dns-message test-host-dns-response test-host-dns-resolver test-host-heap test-memory-source test-storage-source test-relocations check-tools
 
 all: check-tools $(BUILD)/linux95-kernel.img $(BUILD)/user/init.elf $(BUILD)/user/worker.elf $(BUILD)/editor_model.o
 
@@ -267,7 +268,7 @@ $(BUILD)/terminal_model.o: kernel/gui/terminal_model.cpp kernel/gui/terminal_mod
 $(BUILD)/editor_model.o: kernel/gui/editor_model.cpp kernel/gui/editor_model.hpp kernel/filesystem/vfs.hpp kernel/filesystem/filesystem.hpp | $(BUILD)
 >$(CXX) $(CXXFLAGS) -c $< -o $@
 
-$(BUILD)/terminal_app.o: kernel/gui/terminal_app.cpp kernel/gui/terminal_app.hpp kernel/gui/app.hpp kernel/gui/terminal_model.hpp kernel/terminal/shell_session.hpp kernel/terminal/shell.hpp kernel/graphics/renderer.hpp kernel/net/network.hpp kernel/net/dns.hpp | $(BUILD)
+$(BUILD)/terminal_app.o: kernel/gui/terminal_app.cpp kernel/gui/terminal_app.hpp kernel/gui/app.hpp kernel/gui/terminal_model.hpp kernel/terminal/shell_session.hpp kernel/terminal/shell.hpp kernel/terminal/shell_edit.hpp kernel/graphics/renderer.hpp kernel/net/network.hpp kernel/net/dns.hpp | $(BUILD)
 >$(CXX) $(CXXFLAGS) -c $< -o $@
 
 $(BUILD)/system_info_app.o: kernel/gui/system_info_app.cpp kernel/gui/system_info_app.hpp kernel/gui/app.hpp kernel/graphics/renderer.hpp kernel/arch/pit.hpp kernel/memory/memory.hpp kernel/memory/physical.hpp kernel/memory/heap.hpp kernel/storage/disk.hpp kernel/filesystem/filesystem.hpp | $(BUILD)
@@ -608,11 +609,16 @@ $(BUILD)/storage_self_test.o: kernel/storage/storage_self_test.cpp kernel/storag
 $(BUILD)/shell.o: \
 	kernel/terminal/shell.cpp \
 	kernel/terminal/shell.hpp \
+	kernel/terminal/shell_edit.hpp \
+	kernel/terminal/key_event_adapter.hpp \
 	kernel/terminal/filesystem_commands.hpp \
 	kernel/filesystem/vfs.hpp \
 	kernel/net/network.hpp \
 	kernel/net/dns.hpp \
 	kernel/terminal/shell_session.hpp | $(BUILD)
+>$(CXX) $(CXXFLAGS) -Os -c $< -o $@
+
+$(BUILD)/shell_edit.o: kernel/terminal/shell_edit.cpp kernel/terminal/shell_edit.hpp kernel/terminal/shell.hpp kernel/filesystem/vfs.hpp kernel/terminal/output.hpp | $(BUILD)
 >$(CXX) $(CXXFLAGS) -c $< -o $@
 
 $(BUILD)/filesystem_commands.o: kernel/terminal/filesystem_commands.cpp kernel/terminal/filesystem_commands.hpp kernel/filesystem/vfs.hpp kernel/terminal/output.hpp | $(BUILD)
@@ -842,7 +848,7 @@ test-host-graphics: test-host-mouse-helpers
 
 .PHONY: test-host-shell-session
 
-$(BUILD)/host-shell-session-test: tests/host/shell_session_test.cpp kernel/terminal/output.hpp kernel/terminal/shell_session.hpp kernel/terminal/shell_session.cpp kernel/net/network.hpp kernel/net/dns.hpp | $(BUILD)
+$(BUILD)/host-shell-session-test: tests/host/shell_session_test.cpp kernel/terminal/output.hpp kernel/terminal/shell.hpp kernel/terminal/shell_session.hpp kernel/terminal/shell_session.cpp kernel/net/network.hpp kernel/net/dns.hpp | $(BUILD)
 >$(CXX) $(HOST_CXXFLAGS) tests/host/shell_session_test.cpp kernel/terminal/shell_session.cpp -o $@
 
 test-host-shell-session: $(BUILD)/host-shell-session-test
@@ -893,3 +899,11 @@ test-host-editor-model: $(BUILD)/host-editor-model-test
 >$(BUILD)/host-editor-model-test
 
 test-host-graphics: test-host-editor-model
+
+$(BUILD)/host-shell-edit-test: tests/host/shell_edit_test.cpp kernel/terminal/shell_edit.hpp kernel/terminal/shell_edit.cpp kernel/terminal/shell.hpp kernel/filesystem/vfs.hpp | $(BUILD)
+>$(CXX) $(HOST_CXXFLAGS) tests/host/shell_edit_test.cpp kernel/terminal/shell_edit.cpp -o $@
+
+test-host-shell-edit: $(BUILD)/host-shell-edit-test
+>$(BUILD)/host-shell-edit-test
+
+test-host-graphics: test-host-shell-edit

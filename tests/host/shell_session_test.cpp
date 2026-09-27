@@ -1,5 +1,6 @@
 #include "terminal/output.hpp"
 #include "terminal/shell_session.hpp"
+#include "terminal/shell.hpp"
 #include "net/net_types.hpp"
 #include "net/network.hpp"
 #include "net/dns.hpp"
@@ -21,6 +22,7 @@ struct FakeOutput {
 struct FakeExecutor {
     char command[320];
     size_t calls;
+    linux95::shell::CommandResult result;
 };
 
 struct FakeNetwork {
@@ -176,7 +178,7 @@ void fake_set_color(
 {
 }
 
-void fake_execute(
+linux95::shell::CommandResult fake_execute(
     void* context,
     Output&,
     char* command)
@@ -196,6 +198,7 @@ void fake_execute(
     }
 
     executor->command[i] = '\0';
+    return executor->result;
 }
 
 Output make_fake_output(FakeOutput& fake)
@@ -336,6 +339,23 @@ void test_enter_submits_and_prompts_again()
                 fake.length -
                 suffix_length,
             expected_suffix) == 0);
+}
+
+void test_execute_result_propagates_only_from_submitted_command()
+{
+    FakeOutput fake{};
+    FakeExecutor executor{};
+    executor.result.action = linux95::shell::CommandAction::OpenEditor;
+    const char path[] = "DOCS/NOTES.TXT";
+    for (size_t i = 0; i < sizeof(path); ++i) executor.result.path[i] = path[i];
+    Output output = make_fake_output(fake);
+    ShellSession session(output, &executor, fake_execute);
+    session.begin();
+
+    assert(session.on_char('e').action == linux95::shell::CommandAction::Continue);
+    assert(session.on_char('\n').action == linux95::shell::CommandAction::OpenEditor);
+    assert(strcmp(executor.result.path, "DOCS/NOTES.TXT") == 0);
+    assert(session.on_char('x').action == linux95::shell::CommandAction::Continue);
 }
 
 void test_command_capacity_accepts_259_printable_bytes()
@@ -856,6 +876,7 @@ int main()
     test_printable_characters_echo();
     test_backspace_edits_without_underflow();
     test_enter_submits_and_prompts_again();
+    test_execute_result_propagates_only_from_submitted_command();
     test_command_capacity_accepts_259_printable_bytes();
     test_second_command_starts_empty();
     test_parse_ipv4();
