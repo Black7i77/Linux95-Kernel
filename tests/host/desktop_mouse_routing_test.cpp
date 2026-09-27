@@ -45,7 +45,7 @@ void test_content_coordinates_and_button_state_are_routed()
 
     assert(desktop::route_mouse(
         windows, 7, app, content, gui::Point{137, 129},
-        true, false, true, false));
+        true, false, true));
     assert(capture.calls == 1);
     assert(capture.event.x == 37);
     assert(capture.event.y == 25);
@@ -55,7 +55,7 @@ void test_content_coordinates_and_button_state_are_routed()
 
     assert(desktop::route_mouse(
         windows, 7, app, content, gui::Point{140, 132},
-        false, true, false, false));
+        false, true, false));
     assert(capture.calls == 2);
     assert(capture.event.x == 40);
     assert(capture.event.y == 28);
@@ -73,7 +73,7 @@ void test_null_callback_is_harmless()
     gui::AppInstance app{nullptr, gui::AppCallbacks{nullptr, nullptr, nullptr, nullptr}};
     assert(!desktop::route_mouse(
         windows, 7, app, gui::Rect{100, 104, 300, 196},
-        gui::Point{137, 129}, true, false, true, false));
+        gui::Point{137, 129}, true, false, true));
 }
 
 void test_chrome_panel_outside_content_and_unfocused_apps_do_not_route()
@@ -89,13 +89,13 @@ void test_chrome_panel_outside_content_and_unfocused_apps_do_not_route()
 
     assert(!desktop::route_mouse(
         windows, 7, app, content, gui::Point{110, 90},
-        true, false, true, false));
+        true, false, true));
     assert(!desktop::route_mouse(
         windows, 7, app, content, gui::Point{10, 10},
-        true, false, true, false));
+        true, false, true));
     assert(!desktop::route_mouse(
         windows, 8, app, gui::Rect{450, 104, 300, 196},
-        gui::Point{470, 120}, true, false, true, false));
+        gui::Point{470, 120}, true, false, true));
     assert(capture.calls == 0);
 }
 
@@ -111,9 +111,16 @@ void test_pointer_owned_by_resize_or_drag_does_not_route_to_app()
 
     // The point is within the content rectangle, but the desktop chrome has
     // claimed this pointer action for a resize/drag.
-    assert(!desktop::route_mouse(
+    assert(!desktop::route_mouse_after_chrome(
         windows, 7, app, content, gui::Point{397, 297},
-        true, false, true, true));
+        true, false, true, false, 7));
+    assert(capture.calls == 0);
+
+    // The same post-chrome boundary also suppresses motion/release while the
+    // action was already active before this mouse event.
+    assert(!desktop::route_mouse_after_chrome(
+        windows, 7, app, content, gui::Point{397, 297},
+        false, true, false, true, 7));
     assert(capture.calls == 0);
 }
 

@@ -78,8 +78,19 @@ bool route_mouse(
     gui::Point screen_point,
     bool left_pressed,
     bool left_released,
+    bool left_down);
+
+bool route_mouse_after_chrome(
+    const gui::WindowManager& windows,
+    gui::WindowId target,
+    gui::AppInstance& app,
+    gui::Rect content,
+    gui::Point screen_point,
+    bool left_pressed,
+    bool left_released,
     bool left_down,
-    bool pointer_owned_by_chrome);
+    bool pointer_action_was_active,
+    gui::WindowId pointer_window_after_chrome);
 
 gui::Rect content_rect(
     gui::Rect bounds);

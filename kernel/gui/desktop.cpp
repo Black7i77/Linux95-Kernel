@@ -1379,7 +1379,7 @@ void process_mouse_event(
             window != nullptr &&
             app != nullptr &&
             window->state == gui::WindowState::Open) {
-            route_mouse(
+            route_mouse_after_chrome(
                 state.windows,
                 focused,
                 *app,
@@ -1388,8 +1388,8 @@ void process_mouse_event(
                 pressed,
                 released,
                 event.left,
-                pointer_action_active ||
-                    state.pointer_window != 0);
+                pointer_action_active,
+                state.pointer_window);
         }
     }
 
@@ -1634,14 +1634,12 @@ bool route_mouse(
     gui::Point screen_point,
     bool left_pressed,
     bool left_released,
-    bool left_down,
-    bool pointer_owned_by_chrome)
+    bool left_down)
 {
     const gui::Window* window =
         windows.find(target);
 
     if (
-        pointer_owned_by_chrome ||
         windows.focused() != target ||
         window == nullptr ||
         window->state != gui::WindowState::Open ||
@@ -1661,6 +1659,35 @@ bool route_mouse(
         });
 
     return true;
+}
+
+bool route_mouse_after_chrome(
+    const gui::WindowManager& windows,
+    gui::WindowId target,
+    gui::AppInstance& app,
+    gui::Rect content,
+    gui::Point screen_point,
+    bool left_pressed,
+    bool left_released,
+    bool left_down,
+    bool pointer_action_was_active,
+    gui::WindowId pointer_window_after_chrome)
+{
+    if (
+        pointer_action_was_active ||
+        pointer_window_after_chrome != 0) {
+        return false;
+    }
+
+    return route_mouse(
+        windows,
+        target,
+        app,
+        content,
+        screen_point,
+        left_pressed,
+        left_released,
+        left_down);
 }
 
 gui::Rect content_rect(
