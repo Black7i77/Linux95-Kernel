@@ -71,6 +71,13 @@ Status read_file(
     size_t& bytes_read,
     uint32_t& file_size);
 
+Status touch(const char* path);
+Status write_file(const char* path, const uint8_t* data, size_t size);
+Status mkdir(const char* path);
+Status remove(const char* path);
+Status copy_file(const char* source, const char* destination);
+Status move(const char* source, const char* destination);
+
 const VolumeInfo& volume_info();
 
 } // namespace linux95::filesystem

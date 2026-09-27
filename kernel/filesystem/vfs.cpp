@@ -392,4 +392,34 @@ Status closedir(int dir_handle)
     return Status::Ok;
 }
 
+Status touch(const char* path)
+{
+    return ::linux95::filesystem::touch(path);
+}
+
+Status write_file(const char* path, const uint8_t* data, size_t size)
+{
+    return ::linux95::filesystem::write_file(path, data, size);
+}
+
+Status mkdir(const char* path)
+{
+    return ::linux95::filesystem::mkdir(path);
+}
+
+Status remove(const char* path)
+{
+    return ::linux95::filesystem::remove(path);
+}
+
+Status copy_file(const char* source, const char* destination)
+{
+    return ::linux95::filesystem::copy_file(source, destination);
+}
+
+Status move(const char* source, const char* destination)
+{
+    return ::linux95::filesystem::move(source, destination);
+}
+
 } // namespace linux95::filesystem::vfs

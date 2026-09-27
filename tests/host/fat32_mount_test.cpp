@@ -327,6 +327,16 @@ const ata::DeviceInfo& info(DiskId)
 
 } // namespace linux95::storage
 
+// The mount test links the facade without the mutation backend.
+namespace linux95::filesystem::fat32::write {
+Status touch(const char*) { return Status::Unsupported; }
+Status write_file(const char*, const uint8_t*, size_t) { return Status::Unsupported; }
+Status mkdir(const char*) { return Status::Unsupported; }
+Status remove(const char*) { return Status::Unsupported; }
+Status copy_file(const char*, const char*) { return Status::Unsupported; }
+Status move(const char*, const char*) { return Status::Unsupported; }
+} // namespace linux95::filesystem::fat32::write
+
 int main()
 {
     using namespace linux95;

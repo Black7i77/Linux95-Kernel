@@ -41,4 +41,11 @@ Status readdir(
     bool& end);
 Status closedir(int dir_handle);
 
+Status touch(const char* path);
+Status write_file(const char* path, const uint8_t* data, size_t size);
+Status mkdir(const char* path);
+Status remove(const char* path);
+Status copy_file(const char* source, const char* destination);
+Status move(const char* source, const char* destination);
+
 } // namespace linux95::filesystem::vfs
