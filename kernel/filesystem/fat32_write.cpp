@@ -661,6 +661,59 @@ unpublished_failure:
     return status;
 }
 
+Status move(const char* source, const char* destination)
+{
+    ResolvedPath from = {};
+    Status status = resolve_path(source, from);
+    if (status != Status::Ok) return status;
+    if (!from.exists) return Status::NotFound;
+
+    ResolvedPath to = {};
+    status = resolve_path(destination, to);
+    if (status != Status::Ok) return status;
+    if (to.exists) return Status::AlreadyExists;
+
+    helpers::BpbGeometry g = {};
+    status = geometry_for_write(g);
+    if (status != Status::Ok) return status;
+    const bool directory = (from.entry[11] & 0x10u) != 0;
+    const bool same_parent = from.parent_cluster == to.parent_cluster;
+    if (directory && !same_parent) return Status::Unsupported;
+
+    const uint32_t first = first_cluster(from.entry);
+    if (directory) {
+        if (!valid_cluster(g, first)) return Status::Corrupt;
+    } else {
+        status = validate_file_chain(g, from.entry, first);
+        if (status != Status::Ok) return status;
+    }
+
+    if (same_parent) {
+        uint8_t renamed[32];
+        for (uint32_t i = 0; i < 32; ++i) renamed[i] = from.entry[i];
+        for (uint32_t i = 0; i < 11; ++i) renamed[i] = to.name[i];
+        return put_directory_entry(g, from.slot, renamed, nullptr);
+    }
+
+    char name[13];
+    short_component(to.name, name);
+    DirectorySlot published = {};
+    status = create_directory_entry(to.parent_cluster, name, from.entry, published);
+    if (status != Status::Ok) return status;
+
+    uint8_t deleted[32];
+    for (uint32_t i = 0; i < 32; ++i) deleted[i] = from.entry[i];
+    deleted[0] = 0xe5;
+    bool source_unchanged = false;
+    status = put_directory_entry(g, from.slot, deleted, &source_unchanged);
+    if (status == Status::Ok) return Status::Ok;
+
+    // The source still owns the chain only when its old entry is confirmed.
+    // Roll back the known destination in that case; never touch the FAT data.
+    if (source_unchanged) (void)delete_directory_entry(published);
+    return Status::IoError;
+}
+
 Status resolve_path(const char* path, ResolvedPath& result)
 {
     result = {};

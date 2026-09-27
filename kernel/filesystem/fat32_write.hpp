@@ -20,6 +20,7 @@ struct ResolvedPath {
 Status touch(const char* path);
 Status write_file(const char* path, const uint8_t* data, size_t size);
 Status copy_file(const char* source, const char* destination);
+Status move(const char* source, const char* destination);
 Status mkdir(const char* path);
 Status remove(const char* path);
 

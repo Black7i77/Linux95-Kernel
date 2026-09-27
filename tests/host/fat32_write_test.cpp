@@ -23,6 +23,8 @@ struct WriteFailure { uint32_t ordinal; uint32_t lba; };
 WriteFailure write_failures[2] = {};
 uint32_t write_failure_count = 0;
 bool partial_copy_publication = false;
+bool partial_move_publication = false;
+bool partial_move_source_delete = false;
 linux95::storage::ata::DeviceInfo device = {true, true, 131072, {}};
 
 void fail_read_on(uint32_t lba) { fail_read_lba = lba; }
@@ -71,6 +73,8 @@ void reset(uint16_t flags = 0) {
     fail_lba = 0xffffffffu; fail_read_lba = 0xffffffffu;
     write_failure_count = 0;
     partial_copy_publication = false;
+    partial_move_publication = false;
+    partial_move_source_delete = false;
 }
 bool visit(const linux95::filesystem::Entry& e, void* p) {
     *static_cast<bool*>(p) = strcmp(e.name, "FILE.TXT") == 0;
@@ -133,6 +137,15 @@ bool write_sector(DiskId disk, uint32_t lba, const uint8_t* in) {
     if (partial_copy_publication && write_attempts == 9 && lba == 2053) {
         memcpy(second_root + 32, in + 32, 32);
         memcpy(second_root + 32, "ORPHAN  TXT", 11);
+        return false;
+    }
+    if (partial_move_publication && write_attempts == 1 && lba == 2052) {
+        memcpy(root + 32, in + 32, 32);
+        memcpy(root + 32, "ORPHAN  TXT", 11);
+        return false;
+    }
+    if (partial_move_source_delete && write_attempts == 2 && lba == 2053) {
+        memcpy(second_root, "ORPHAN  TXT", 11);
         return false;
     }
     if (lba == fail_lba) return false;
@@ -459,6 +472,151 @@ void test_file_copy_failures() {
     assert((get32(fat[1], 24) & 0x0fffffffu) == 7);
     assert((get32(fat[0], 28) & 0x0fffffffu) == 0x0fffffffu);
     assert((get32(fat[1], 28) & 0x0fffffffu) == 0x0fffffffu);
+}
+
+void test_move_metadata_and_rejections() {
+    using namespace linux95::filesystem;
+    using namespace linux95::filesystem::fat32;
+    write::ResolvedPath path = {};
+
+    reset(); mounted(); seed_file_chain();
+    second_root[12] = 0x37; second_root[13] = 0x92;
+    uint8_t original[32], saved_fat[2][512];
+    memcpy(original, second_root, 32); memcpy(saved_fat, fat, sizeof fat);
+    assert(write::move("/docs/file.txt", "DOCS/RENAMED.TXT") == Status::Ok);
+    assert(write_attempt_count() == 1);
+    assert(memcmp(second_root, "RENAMED TXT", 11) == 0);
+    assert(memcmp(second_root + 11, original + 11, 21) == 0);
+    assert(memcmp(saved_fat, fat, sizeof fat) == 0);
+    assert(write::resolve_path("DOCS/FILE.TXT", path) == Status::Ok && !path.exists);
+    uint8_t expected[1024];
+    memset(expected, 'A', 512); memset(expected + 512, 'B', 512);
+    check_file("DOCS/RENAMED.TXT", expected, sizeof expected);
+
+    reset(); mounted(); seed_file_chain();
+    second_root[12] = 0x37;
+    memcpy(original, second_root, 32); memcpy(saved_fat, fat, sizeof fat);
+    assert(write::move("DOCS/FILE.TXT", "/MOVED.TXT") == Status::Ok);
+    assert(write_attempt_count() == 2);
+    assert(second_root[0] == 0xe5);
+    assert(memcmp(root + 32, "MOVED   TXT", 11) == 0);
+    assert(memcmp(root + 32 + 11, original + 11, 21) == 0);
+    assert(memcmp(saved_fat, fat, sizeof fat) == 0);
+    check_file("MOVED.TXT", expected, sizeof expected);
+    assert(write::resolve_path("DOCS/FILE.TXT", path) == Status::Ok && !path.exists);
+
+    reset(); mounted(); seed_file_chain();
+    assert(write::mkdir("DOCS/SUB") == Status::Ok);
+    assert(write::touch("DOCS/SUB/CHILD.TXT") == Status::Ok);
+    assert(write::resolve_path("DOCS/SUB", path) == Status::Ok && path.exists);
+    uint8_t old_directory[32], old_dot[64];
+    memcpy(old_directory, path.entry, 32);
+    const uint32_t directory_lba = 2052 + path.entry[26] - 2;
+    memcpy(old_dot, data_sectors[directory_lba - 2052], 64);
+    const uint32_t writes_before_rename = write_attempt_count();
+    assert(write::move("DOCS/SUB", "DOCS/RENAMED") == Status::Ok);
+    assert(write_attempt_count() == writes_before_rename + 1);
+    assert(write::resolve_path("DOCS/RENAMED", path) == Status::Ok && path.exists);
+    assert(memcmp(path.entry + 11, old_directory + 11, 21) == 0);
+    assert(memcmp(data_sectors[directory_lba - 2052], old_dot, 64) == 0);
+    assert(write::resolve_path("DOCS/RENAMED/CHILD.TXT", path) == Status::Ok && path.exists);
+    assert(write::resolve_path("DOCS/SUB", path) == Status::Ok && !path.exists);
+
+    reset(); mounted(); seed_file_chain();
+    const uint32_t before = write_attempt_count();
+    assert(write::move("DOCS/FILE.TXT", "DOCS/FILE.TXT") == Status::AlreadyExists);
+    assert(write::move("DOCS", "/docs") == Status::AlreadyExists);
+    assert(write::move("DOCS/FILE.TXT", "DOCS") == Status::AlreadyExists);
+    assert(write::move("DOCS/FILE.TXT", "DOCS/NEW.TXT") == Status::Ok);
+    assert(write::move("DOCS/NEW.TXT", "DOCS/FILE.TXT") == Status::Ok);
+    const uint32_t after_roundtrip = write_attempt_count();
+    assert(write::move("DOCS", "DOCS/FILE.TXT/DOCS") == Status::NotDirectory);
+    assert(write::move("DOCS", "DOCS/FILE.TXT") == Status::AlreadyExists);
+    assert(write::move("DOCS", "DOCS/INNER") == Status::Unsupported);
+    assert(write::move("DOCS/FILE.TXT", "MISSING/NEW.TXT") == Status::NotFound);
+    assert(write::move("MISSING.TXT", "NEW.TXT") == Status::NotFound);
+    assert(write::move("DOCS/FILE.TXT", "DOCS/BAD?.TXT") == Status::InvalidName);
+    assert(write::move("/", "NEW") == Status::InvalidName);
+    assert(write::move("DOCS/.", "NEW") == Status::InvalidName);
+    assert(write::move("DOCS/..", "NEW") == Status::InvalidName);
+    assert(write::move("DOCS", "DOCS/.") == Status::InvalidName);
+    assert(write::move("DOCS/FILE.TXT", "DOCS//NEW") == Status::InvalidName);
+    assert(write::move("DOCS/FILE.TXT", "DOCS/NEW/") == Status::InvalidName);
+    assert(write::move("", "NEW") == Status::InvalidName);
+    assert(write::move("DOCS/FILE.TXT", nullptr) == Status::InvalidName);
+    assert(write_attempt_count() == after_roundtrip && after_roundtrip == before + 2);
+    check_old_file();
+
+    reset(); mounted(); seed_file_chain();
+    assert(write::mkdir("DOCS/SUB") == Status::Ok);
+    const uint32_t before_unsupported = write_attempt_count();
+    assert(write::move("DOCS", "DOCS/SUB/DOCS") == Status::Unsupported);
+    assert(write::move("DOCS/SUB", "SUB") == Status::Unsupported);
+    assert(write_attempt_count() == before_unsupported);
+
+    reset(); mounted(); seed_file_chain();
+    put32(fat[1], 16, 0x0ffffff7u);
+    assert(write::move("DOCS/FILE.TXT", "MOVED.TXT") == Status::Corrupt);
+    assert(write_attempt_count() == 0);
+    reset(0x0081); mounted();
+    assert(write::move("DOCS/FILE.TXT", "MOVED.TXT") == Status::Unsupported);
+    assert(write_attempt_count() == 0);
+}
+
+void test_move_failures() {
+    using namespace linux95::filesystem;
+    using namespace linux95::filesystem::fat32;
+    uint8_t saved_fat[2][512];
+    write::ResolvedPath path = {};
+
+    reset(); mounted(); seed_file_chain(); memcpy(saved_fat, fat, sizeof fat);
+    fail_write_on(1, 2053); // in-place rename
+    assert(write::move("DOCS/FILE.TXT", "DOCS/NEW.TXT") == Status::IoError);
+    check_old_file();
+    assert(write::resolve_path("DOCS/NEW.TXT", path) == Status::Ok && !path.exists);
+    assert(memcmp(saved_fat, fat, sizeof fat) == 0);
+
+    reset(); mounted(); seed_file_chain(); memcpy(saved_fat, fat, sizeof fat);
+    fail_write_on(1, 2052); // destination publication
+    assert(write::move("DOCS/FILE.TXT", "MOVED.TXT") == Status::IoError);
+    check_old_file();
+    assert(write::resolve_path("MOVED.TXT", path) == Status::Ok && !path.exists);
+    assert(memcmp(saved_fat, fat, sizeof fat) == 0);
+
+    reset(); mounted(); seed_file_chain(); memcpy(saved_fat, fat, sizeof fat);
+    fail_write_on(2, 2053); // source deletion; destination rollback succeeds
+    assert(write::move("DOCS/FILE.TXT", "MOVED.TXT") == Status::IoError);
+    assert(write_attempt_count() == 3);
+    check_old_file();
+    assert(write::resolve_path("MOVED.TXT", path) == Status::Ok && !path.exists);
+    assert(memcmp(saved_fat, fat, sizeof fat) == 0);
+
+    reset(); mounted(); seed_file_chain(); memcpy(saved_fat, fat, sizeof fat);
+    fail_write_on(2, 2053); fail_write_on(3, 2052); // rollback also fails
+    assert(write::move("DOCS/FILE.TXT", "MOVED.TXT") == Status::IoError);
+    assert(write_attempt_count() == 3);
+    check_old_file();
+    uint8_t expected[1024];
+    memset(expected, 'A', 512); memset(expected + 512, 'B', 512);
+    check_file("MOVED.TXT", expected, sizeof expected);
+    assert(memcmp(saved_fat, fat, sizeof fat) == 0);
+
+    reset(); mounted(); seed_file_chain(); memcpy(saved_fat, fat, sizeof fat);
+    partial_move_publication = true;
+    assert(write::move("DOCS/FILE.TXT", "MOVED.TXT") == Status::IoError);
+    check_old_file();
+    assert(write::resolve_path("MOVED.TXT", path) == Status::Ok && !path.exists);
+    assert(write::resolve_path("ORPHAN.TXT", path) == Status::Ok && path.exists);
+    assert(path.entry[26] == 4 && get32(path.entry, 28) == 1024);
+    assert(memcmp(saved_fat, fat, sizeof fat) == 0);
+
+    reset(); mounted(); seed_file_chain(); memcpy(saved_fat, fat, sizeof fat);
+    partial_move_source_delete = true;
+    assert(write::move("DOCS/FILE.TXT", "MOVED.TXT") == Status::IoError);
+    assert(write::resolve_path("DOCS/ORPHAN.TXT", path) == Status::Ok && path.exists);
+    assert(write::resolve_path("MOVED.TXT", path) == Status::Ok && path.exists);
+    assert(path.entry[26] == 4 && get32(path.entry, 28) == 1024);
+    assert(memcmp(saved_fat, fat, sizeof fat) == 0);
 }
 
 int main() {
@@ -959,5 +1117,7 @@ int main() {
     test_directory_creation_and_removal();
     test_file_copy();
     test_file_copy_failures();
+    test_move_metadata_and_rejections();
+    test_move_failures();
     puts("fat32 write tests: PASS");
 }
