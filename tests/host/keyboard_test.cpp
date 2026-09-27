@@ -73,8 +73,14 @@ static void test_extended_arrows_and_breaks()
         assert(event.key == keys[i] && !event.pressed);
     }
     assert(!decoder.feed(0xE0, event));
-    assert(!decoder.feed(0x1C, event)); // unsupported E0 key
+    assert(decoder.feed(0x1C, event)); // unsupported E0 key is observable
+    assert(event.key == KeyCode::Unknown && event.pressed);
+    assert(!decoder.feed(0xE0, event));
+    assert(decoder.feed(0x9C, event));
+    assert(event.key == KeyCode::Unknown && !event.pressed);
+    decoder.reset();
     assert(!decoder.feed(0xE0, event)); // prefix alone is never an event
+    decoder.reset();
     assert(!decoder.feed(0x2A, event)); // modifier alone is never an event
 }
 

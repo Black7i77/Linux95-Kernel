@@ -154,6 +154,28 @@ void test_pending_network_results_pause_and_resume_with_editor()
     assert(app.mode() == gui::TerminalApp::Mode::Shell);
 }
 
+void test_modified_indicator_is_visible_at_minimum_terminal_width()
+{
+    gui::TerminalApp app;
+    type(app, "edit EXIST.TXT");
+    enter(app);
+    assert(app.mode() == gui::TerminalApp::Mode::Editor);
+
+    static uint32_t pixels[160 * 64];
+    graphics::Framebuffer framebuffer{
+        reinterpret_cast<volatile uint8_t*>(pixels), 160, 64, 160 * 4,
+        {8, 16, 8, 8, 8, 0}};
+    memset(pixels, 0, sizeof(pixels));
+    app.instance().callbacks.draw(&app, framebuffer, {0, 0, 160, 64});
+    uint32_t clean_header[160 * 8];
+    memcpy(clean_header, pixels, sizeof(clean_header));
+
+    send(app, {keyboard::KeyCode::Character, 'x', false, false, true});
+    memset(pixels, 0, sizeof(pixels));
+    app.instance().callbacks.draw(&app, framebuffer, {0, 0, 160, 64});
+    assert(memcmp(clean_header, pixels, sizeof(clean_header)) != 0);
+}
+
 } // namespace
 
 namespace linux95::shell {
@@ -236,5 +258,6 @@ int main()
     test_shell_editor_lifecycle_and_polling();
     test_failed_open_and_missing_file_clean_quit();
     test_pending_network_results_pause_and_resume_with_editor();
+    test_modified_indicator_is_visible_at_minimum_terminal_width();
     return 0;
 }

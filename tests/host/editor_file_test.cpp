@@ -1,4 +1,5 @@
 #include "gui/editor_file.hpp"
+#include "filesystem/fat32_helpers.hpp"
 
 #include <assert.h>
 #include <stddef.h>
@@ -112,7 +113,7 @@ void test_path_types_and_missing_leaf_rules()
     parent_not_directory = true;
     assert(gui::editor::open_file(model, "/FILE/PATH.TXT") == filesystem::Status::NotDirectory);
     reset_file("/BAD?.TXT", nullptr, 0);
-    file_status = filesystem::Status::InvalidName;
+    file_status = filesystem::Status::NotFound;
     assert(gui::editor::open_file(model, "/BAD?.TXT") == filesystem::Status::InvalidName);
 }
 
@@ -165,6 +166,12 @@ namespace linux95::filesystem::vfs {
 
 Status stat(const char* path, FileStat& info)
 {
+    const char* relative = path;
+    if (relative != nullptr && relative[0] == '/') ++relative;
+    if (relative != nullptr && *relative != '\0' &&
+        !fat32::helpers::valid_path(relative)) {
+        return Status::InvalidName;
+    }
     if (strcmp(path, current_path) == 0) {
         if (file_status != Status::Ok) return file_status;
         info = {directory, static_cast<uint32_t>(file_size)};

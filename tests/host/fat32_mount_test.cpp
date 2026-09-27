@@ -349,6 +349,9 @@ int main()
         filesystem::volume_info();
 
     assert(volume.mounted);
+    filesystem::Entry invalid_entry{};
+    assert(filesystem::stat_path("BAD?.TXT", invalid_entry) ==
+        filesystem::Status::InvalidName);
     assert(volume.bytes_per_sector == 512);
     assert(volume.sectors_per_cluster == 1);
     assert(volume.fat_count == 2);

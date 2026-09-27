@@ -121,7 +121,7 @@ DNS_NETWORK_TEST_IMAGE := $(BUILD)/linux95-dns-network-test.img
 FAT32_WRITE_TEST_OBJS := $(subst $(BUILD)/fat32_write.o,$(BUILD)/fat32-write-test-writer.o,$(subst $(BUILD)/kernel.o,$(BUILD)/kernel-fat32-write-test.o,$(KERNEL_OBJS))) $(BUILD)/fat32_write_self_test.o
 EDITOR_TEST_OBJS := $(subst $(BUILD)/terminal_app.o,$(BUILD)/editor-test-terminal-app.o,$(KERNEL_OBJS))
 
-.PHONY: all clean run run-debug test test-qemu prepare-storage-test-image test-host-keyboard test-host-terminal-key-event test-host-editor-model test-host-shell-edit test-host-editor-file test-host-editor-state test-host-terminal-editor-integration test-host-segments test-host-process test-host-scheduler test-host-user-space test-host-elf test-host-elf-loader-plan test-host-syscall test-host-memory test-host-storage test-host-filesystem test-host-graphics test-host-pci test-host-rtl8139-helpers test-host-kernel-virtual-to-physical test-host-ethernet test-host-arp test-host-ipv4 test-host-icmp test-host-udp test-host-udp-bindings test-host-network-udp test-host-dns-message test-host-dns-response test-host-dns-resolver test-host-heap test-memory-source test-storage-source test-relocations check-tools
+.PHONY: all clean run run-debug test test-qemu prepare-storage-test-image test-host-keyboard test-host-keyboard-queue-concurrency test-host-terminal-key-event test-host-editor-model test-host-shell-edit test-host-editor-file test-host-editor-state test-host-terminal-editor-integration test-host-segments test-host-process test-host-scheduler test-host-user-space test-host-elf test-host-elf-loader-plan test-host-syscall test-host-memory test-host-storage test-host-filesystem test-host-graphics test-host-pci test-host-rtl8139-helpers test-host-kernel-virtual-to-physical test-host-ethernet test-host-arp test-host-ipv4 test-host-icmp test-host-udp test-host-udp-bindings test-host-network-udp test-host-dns-message test-host-dns-response test-host-dns-resolver test-host-heap test-memory-source test-storage-source test-relocations check-tools
 .PHONY: prepare-editor-test-image
 
 all: check-tools $(BUILD)/linux95-kernel.img $(BUILD)/user/init.elf $(BUILD)/user/worker.elf $(BUILD)/editor_model.o $(BUILD)/editor_file.o
@@ -916,7 +916,13 @@ $(BUILD)/host-keyboard-test: tests/host/keyboard_test.cpp kernel/arch/keyboard.h
 test-host-keyboard: $(BUILD)/host-keyboard-test
 >$(BUILD)/host-keyboard-test
 
-test-host-graphics: test-host-keyboard
+test-host-keyboard-queue-concurrency: $(BUILD)/host-keyboard-queue-concurrency-test
+>$(BUILD)/host-keyboard-queue-concurrency-test
+
+$(BUILD)/host-keyboard-queue-concurrency-test: tests/host/keyboard_queue_concurrency_test.cpp kernel/arch/keyboard_helpers.hpp kernel/arch/keyboard.hpp | $(BUILD)
+>$(CXX) $(HOST_CXXFLAGS) -pthread $< -o $@
+
+test-host-graphics: test-host-keyboard test-host-keyboard-queue-concurrency
 
 $(BUILD)/host-terminal-key-event-test: tests/host/terminal_key_event_test.cpp kernel/gui/desktop.cpp kernel/gui/desktop.hpp kernel/gui/app.hpp kernel/gui/window_manager.cpp kernel/gui/window_manager.hpp kernel/arch/keyboard.hpp | $(BUILD)
 >$(CXX) $(HOST_CXXFLAGS) -ffunction-sections -fdata-sections $< kernel/gui/desktop.cpp kernel/gui/window_manager.cpp -Wl,--gc-sections -o $@

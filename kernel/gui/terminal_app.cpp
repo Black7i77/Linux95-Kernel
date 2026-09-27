@@ -378,9 +378,34 @@ void TerminalApp::draw_editor(
 
     char header[kEditorMaxColumns + 1];
     size_t header_length = 0;
-    append_text(header, sizeof(header), header_length, "Linux95 Editor - ");
-    append_text(header, sizeof(header), header_length, editor_.path());
-    if (editor_.modified()) append_text(header, sizeof(header), header_length, " * Modified");
+    constexpr char kTitle[] = "Linux95 Editor - ";
+    constexpr char kFullModified[] = " * Modified";
+    constexpr char kCompactModified[] = " *";
+    append_text(header, sizeof(header), header_length, kTitle);
+    const size_t title_length = sizeof(kTitle) - 1;
+    const char* modified_suffix = nullptr;
+    size_t suffix_length = 0;
+    if (editor_.modified()) {
+        if (columns >= title_length + sizeof(kFullModified)) {
+            modified_suffix = kFullModified;
+            suffix_length = sizeof(kFullModified) - 1;
+        } else {
+            modified_suffix = kCompactModified;
+            suffix_length = sizeof(kCompactModified) - 1;
+        }
+    }
+    const size_t path_budget = columns > title_length + suffix_length
+        ? columns - title_length - suffix_length : 0;
+    size_t path_length = 0;
+    while (editor_.path()[path_length] != '\0' && path_length < path_budget) {
+        ++path_length;
+    }
+    for (size_t i = 0; i < path_length; ++i) {
+        if (header_length + 1 < sizeof(header)) header[header_length++] = editor_.path()[i];
+    }
+    if (modified_suffix != nullptr) {
+        append_text(header, sizeof(header), header_length, modified_suffix);
+    }
     header[header_length] = '\0';
     draw_clipped_text(framebuffer, content, 0, 0, columns, header, kTerminalForeground);
 

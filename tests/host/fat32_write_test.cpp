@@ -876,7 +876,7 @@ int main(int argc, char** argv) {
     for (const char* name : invalid_names) {
         assert(!helpers::encode_short_name(name, strlen(name), short_name));
     }
-    assert(helpers::valid_path_component("A+B", 3)); // legacy read parser stays compatible
+    assert(!helpers::valid_path_component("A+B", 3));
     assert(helpers::encode_short_name("A~B", 3, short_name));
     assert(!helpers::encode_short_name("A\\B", 3, short_name));
     assert(!helpers::encode_short_name("A B", 3, short_name));

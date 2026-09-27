@@ -45,7 +45,7 @@ public:
             case 0x4D: key = KeyCode::ArrowRight; break;
             case 0x48: key = KeyCode::ArrowUp; break;
             case 0x50: key = KeyCode::ArrowDown; break;
-            default: return false;
+            default: break;
             }
         } else if (code == 0x1C) {
             key = KeyCode::Enter;
@@ -53,8 +53,7 @@ public:
             key = KeyCode::Backspace;
         } else {
             character = translate(code, left_shift_ || right_shift_);
-            if (character == 0) return false;
-            key = KeyCode::Character;
+            if (character != 0) key = KeyCode::Character;
         }
 
         out = KeyEvent{key, character, left_ctrl_ || right_ctrl_,
@@ -98,34 +97,41 @@ public:
 
     bool push(const KeyEvent& event)
     {
-        if (count_ == kCapacity) return false;
-        events_[head_] = event;
-        head_ = (head_ + 1) % kCapacity;
-        ++count_;
+        const uint32_t head = __atomic_load_n(&head_, __ATOMIC_RELAXED);
+        const uint32_t tail = __atomic_load_n(&tail_, __ATOMIC_ACQUIRE);
+        if (static_cast<uint32_t>(head - tail) == kCapacity) return false;
+        events_[head % kCapacity] = event;
+        __atomic_store_n(&head_, head + 1, __ATOMIC_RELEASE);
         return true;
     }
 
-    bool empty() const { return count_ == 0; }
+    bool empty() const
+    {
+        const uint32_t head = __atomic_load_n(&head_, __ATOMIC_ACQUIRE);
+        const uint32_t tail = __atomic_load_n(&tail_, __ATOMIC_RELAXED);
+        return head == tail;
+    }
 
     void reset()
     {
-        head_ = tail_ = count_ = 0;
+        __atomic_store_n(&tail_, 0, __ATOMIC_RELAXED);
+        __atomic_store_n(&head_, 0, __ATOMIC_RELAXED);
     }
 
     KeyEvent pop()
     {
-        if (empty()) return KeyEvent{};
-        const KeyEvent event = events_[tail_];
-        tail_ = (tail_ + 1) % kCapacity;
-        --count_;
+        const uint32_t tail = __atomic_load_n(&tail_, __ATOMIC_RELAXED);
+        const uint32_t head = __atomic_load_n(&head_, __ATOMIC_ACQUIRE);
+        if (head == tail) return KeyEvent{};
+        const KeyEvent event = events_[tail % kCapacity];
+        __atomic_store_n(&tail_, tail + 1, __ATOMIC_RELEASE);
         return event;
     }
 
 private:
     KeyEvent events_[kCapacity]{};
-    size_t head_ = 0;
-    size_t tail_ = 0;
-    size_t count_ = 0;
+    uint32_t head_ = 0;
+    uint32_t tail_ = 0;
 };
 
 inline void decode_and_queue(Set1Decoder& decoder, EventQueue& queue, uint8_t scancode)

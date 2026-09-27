@@ -48,6 +48,8 @@ int main()
 
     assert(valid_path_component("README.TXT", 10));
     assert(!valid_path_component("ABCDEFGHI.TXT", 13));
+    assert(!valid_path_component("BAD?.TXT", 8));
+    assert(!valid_path("BAD?.TXT"));
 
     uint8_t bpb[512] = {};
 

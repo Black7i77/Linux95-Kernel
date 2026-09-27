@@ -106,6 +106,19 @@ inline char ascii_upper(char c)
     return c;
 }
 
+inline bool valid_short_name_character(char c)
+{
+    const bool alphanumeric = (c >= 'A' && c <= 'Z') ||
+                              (c >= 'a' && c <= 'z') ||
+                              (c >= '0' && c <= '9');
+    constexpr char allowed[] = "$%'-_@~`!(){}^#&";
+    if (alphanumeric) return true;
+    for (size_t i = 0; i + 1 < sizeof(allowed); ++i) {
+        if (c == allowed[i]) return true;
+    }
+    return false;
+}
+
 inline bool ascii_iequals(const char* a, const char* b)
 {
     if (a == nullptr || b == nullptr) {
@@ -225,6 +238,8 @@ inline bool valid_path_component(
             continue;
         }
 
+        if (!valid_short_name_character(c)) return false;
+
         if (!seen_dot) {
             ++base_length;
 
@@ -254,18 +269,6 @@ inline bool valid_path_component(
 inline bool encode_short_name(const char* text, size_t length, uint8_t out[11])
 {
     if (out == nullptr || !valid_path_component(text, length)) return false;
-    constexpr char allowed[] = "$%'-_@~`!(){}^#&";
-    for (size_t i = 0; i < length; ++i) {
-        const char c = text[i];
-        if (c == '.') continue;
-        const bool alphanumeric = (c >= 'A' && c <= 'Z') ||
-                                  (c >= 'a' && c <= 'z') ||
-                                  (c >= '0' && c <= '9');
-        bool punctuation = false;
-        for (size_t j = 0; j < sizeof allowed - 1; ++j)
-            if (c == allowed[j]) punctuation = true;
-        if (!alphanumeric && !punctuation) return false;
-    }
     for (size_t i = 0; i < 11; ++i) out[i] = ' ';
     size_t position = 0;
     for (size_t i = 0; i < length; ++i) {
