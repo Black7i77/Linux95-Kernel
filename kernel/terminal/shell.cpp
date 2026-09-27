@@ -581,23 +581,21 @@ CommandResult execute_session_command(
     terminal::Output output =
         terminal::make_vga_output();
 
-    terminal::NetworkCallbacks network_callbacks{
-        nullptr,
-        network_status,
-        network_start_ping,
-        network_ping_result,
-        network_clear_ping_result,
-    };
+    terminal::NetworkCallbacks network_callbacks{};
+    network_callbacks.context = nullptr;
+    network_callbacks.status = network_status;
+    network_callbacks.start_ping = network_start_ping;
+    network_callbacks.ping_result = network_ping_result;
+    network_callbacks.clear_ping_result = network_clear_ping_result;
 
-    terminal::DnsCallbacks dns_callbacks{
-        nullptr,
-        dns_begin_lookup,
-        dns_lookup_status,
-        dns_result_count,
-        dns_result_address,
-        dns_server,
-        dns_set_server,
-    };
+    terminal::DnsCallbacks dns_callbacks{};
+    dns_callbacks.context = nullptr;
+    dns_callbacks.begin_lookup = dns_begin_lookup;
+    dns_callbacks.lookup_status = dns_lookup_status;
+    dns_callbacks.result_count = dns_result_count;
+    dns_callbacks.result_address = dns_result_address;
+    dns_callbacks.server = dns_server;
+    dns_callbacks.set_server = dns_set_server;
 
     terminal::ShellSession session(
         output,

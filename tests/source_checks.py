@@ -252,7 +252,7 @@ if "prepare-storage-test-image: $(STORAGE_TEST_IMAGE)" not in makefile_source:
 if "reinterpret_cast<const char*>(frame.rsi)" in (
         ROOT / "kernel/syscall/syscall.cpp").read_text():
     raise SystemExit("FAIL: raw userspace pointer dereference in syscall write")
-require("kernel/arch/keyboard.cpp", "kBufferSize = 128")
+require("kernel/arch/keyboard_helpers.hpp", "kCapacity = 128")
 require("kernel/terminal/shell.cpp", '"help"')
 require("kernel/terminal/shell.cpp", '"reboot"')
 require("kernel/terminal/shell.cpp", "Linux95 Kernel v1.0 Storage Foundation")

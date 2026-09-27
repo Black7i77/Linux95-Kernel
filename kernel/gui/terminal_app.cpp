@@ -165,22 +165,8 @@ size_t smaller(
 TerminalApp::TerminalApp()
     : model_{},
       output_(make_output(model_)),
-      network_callbacks_{
-          nullptr,
-          network_status,
-          network_start_ping,
-          network_ping_result,
-          network_clear_ping_result,
-      },
-      dns_callbacks_{
-          nullptr,
-          dns_begin_lookup,
-          dns_lookup_status,
-          dns_result_count,
-          dns_result_address,
-          dns_server,
-          dns_set_server,
-      },
+      network_callbacks_{},
+      dns_callbacks_{},
       session_(
           output_,
           nullptr,
@@ -190,6 +176,20 @@ TerminalApp::TerminalApp()
       editor_(g_editor_storage, sizeof(g_editor_storage)),
       mode_(Mode::Shell)
 {
+    network_callbacks_.context = nullptr;
+    network_callbacks_.status = network_status;
+    network_callbacks_.start_ping = network_start_ping;
+    network_callbacks_.ping_result = network_ping_result;
+    network_callbacks_.clear_ping_result = network_clear_ping_result;
+
+    dns_callbacks_.context = nullptr;
+    dns_callbacks_.begin_lookup = dns_begin_lookup;
+    dns_callbacks_.lookup_status = dns_lookup_status;
+    dns_callbacks_.result_count = dns_result_count;
+    dns_callbacks_.result_address = dns_result_address;
+    dns_callbacks_.server = dns_server;
+    dns_callbacks_.set_server = dns_set_server;
+
     session_.begin();
 }
 
