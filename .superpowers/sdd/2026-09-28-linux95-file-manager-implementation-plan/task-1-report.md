@@ -49,8 +49,18 @@ g++ ... tests/host/desktop_mouse_routing_test.cpp kernel/gui/desktop.cpp kernel/
 
 ## Commit
 
-`250e146` — `Add generic GUI app mouse routing`.
+`f8e443a` — `Add generic GUI app mouse routing`.
 
 ## Concerns
 
 The host test directly exercises the public router and its focus/content checks. The drag/resize suppression is enforced at the desktop event integration point and compiled by the full kernel build, but the private runtime mouse loop is not simulated in a host test.
+
+## Review fix rounds
+
+The independent task review found that the initial press on a resize grip could reach the app because pointer ownership was captured before chrome handling. It also requested a host-testable integration boundary.
+
+- `bf87795 Keep chrome pointer actions out of app routing`: passed post-chrome pointer ownership to the router. The first scoped re-review accepted the runtime fix but requested that the test exercise the same post-chrome boundary.
+- `3c1b60b Test post-chrome pointer routing boundary`: introduced `route_mouse_after_chrome`, used by runtime after chrome handling and covered for newly claimed and already-active pointer actions.
+- RED: the focused target failed to compile because `route_mouse_after_chrome` did not exist.
+- GREEN/regression: `make build/host-desktop-mouse-routing-test && ./build/host-desktop-mouse-routing-test`, `make test-host-graphics`, and `make test` all exited 0; `git diff --check` was clean.
+- Fresh scoped re-review verdict: both findings addressed; no new breakage reported. The reviewer notes the host test exercises the shared post-chrome decision boundary, not the entire private mouse event loop.
