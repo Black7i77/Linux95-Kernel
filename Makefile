@@ -63,6 +63,7 @@ KERNEL_OBJS := \
 	$(BUILD)/kernel.o \
 	$(BUILD)/vga.o $(BUILD)/vga_output.o $(BUILD)/shell_session.o $(BUILD)/framebuffer.o $(BUILD)/renderer.o \
         $(BUILD)/terminal_model.o $(BUILD)/terminal_app.o \
+        $(BUILD)/editor_model.o $(BUILD)/editor_file.o \
         $(BUILD)/system_info_app.o \
         $(BUILD)/window_manager.o \
         $(BUILD)/desktop.o \
@@ -117,7 +118,7 @@ DNS_NETWORK_TEST_OBJS := $(subst $(BUILD)/dns.o,$(BUILD)/dns-dns-network-test.o,
 DNS_NETWORK_TEST_IMAGE := $(BUILD)/linux95-dns-network-test.img
 FAT32_WRITE_TEST_OBJS := $(subst $(BUILD)/fat32_write.o,$(BUILD)/fat32-write-test-writer.o,$(subst $(BUILD)/kernel.o,$(BUILD)/kernel-fat32-write-test.o,$(KERNEL_OBJS))) $(BUILD)/fat32_write_self_test.o
 
-.PHONY: all clean run run-debug test test-qemu prepare-storage-test-image test-host-keyboard test-host-terminal-key-event test-host-editor-model test-host-shell-edit test-host-editor-file test-host-editor-state test-host-segments test-host-process test-host-scheduler test-host-user-space test-host-elf test-host-elf-loader-plan test-host-syscall test-host-memory test-host-storage test-host-filesystem test-host-graphics test-host-pci test-host-rtl8139-helpers test-host-kernel-virtual-to-physical test-host-ethernet test-host-arp test-host-ipv4 test-host-icmp test-host-udp test-host-udp-bindings test-host-network-udp test-host-dns-message test-host-dns-response test-host-dns-resolver test-host-heap test-memory-source test-storage-source test-relocations check-tools
+.PHONY: all clean run run-debug test test-qemu prepare-storage-test-image test-host-keyboard test-host-terminal-key-event test-host-editor-model test-host-shell-edit test-host-editor-file test-host-editor-state test-host-terminal-editor-integration test-host-segments test-host-process test-host-scheduler test-host-user-space test-host-elf test-host-elf-loader-plan test-host-syscall test-host-memory test-host-storage test-host-filesystem test-host-graphics test-host-pci test-host-rtl8139-helpers test-host-kernel-virtual-to-physical test-host-ethernet test-host-arp test-host-ipv4 test-host-icmp test-host-udp test-host-udp-bindings test-host-network-udp test-host-dns-message test-host-dns-response test-host-dns-resolver test-host-heap test-memory-source test-storage-source test-relocations check-tools
 
 all: check-tools $(BUILD)/linux95-kernel.img $(BUILD)/user/init.elf $(BUILD)/user/worker.elf $(BUILD)/editor_model.o $(BUILD)/editor_file.o
 
@@ -266,13 +267,13 @@ $(BUILD)/terminal_model.o: kernel/gui/terminal_model.cpp kernel/gui/terminal_mod
 >$(CXX) $(CXXFLAGS) -c $< -o $@
 
 $(BUILD)/editor_model.o: kernel/gui/editor_model.cpp kernel/gui/editor_model.hpp kernel/filesystem/vfs.hpp kernel/filesystem/filesystem.hpp | $(BUILD)
->$(CXX) $(CXXFLAGS) -c $< -o $@
+>$(CXX) $(CXXFLAGS) -Os -c $< -o $@
 
 $(BUILD)/editor_file.o: kernel/gui/editor_file.cpp kernel/gui/editor_file.hpp kernel/gui/editor_model.hpp kernel/filesystem/vfs.hpp kernel/filesystem/filesystem.hpp | $(BUILD)
->$(CXX) $(CXXFLAGS) -c $< -o $@
+>$(CXX) $(CXXFLAGS) -Os -c $< -o $@
 
-$(BUILD)/terminal_app.o: kernel/gui/terminal_app.cpp kernel/gui/terminal_app.hpp kernel/gui/app.hpp kernel/gui/terminal_model.hpp kernel/terminal/shell_session.hpp kernel/terminal/shell.hpp kernel/terminal/shell_edit.hpp kernel/graphics/renderer.hpp kernel/net/network.hpp kernel/net/dns.hpp | $(BUILD)
->$(CXX) $(CXXFLAGS) -c $< -o $@
+$(BUILD)/terminal_app.o: kernel/gui/terminal_app.cpp kernel/gui/terminal_app.hpp kernel/gui/app.hpp kernel/gui/terminal_model.hpp kernel/gui/editor_model.hpp kernel/gui/editor_file.hpp kernel/terminal/shell_session.hpp kernel/terminal/shell.hpp kernel/terminal/shell_edit.hpp kernel/graphics/renderer.hpp kernel/net/network.hpp kernel/net/dns.hpp | $(BUILD)
+>$(CXX) $(CXXFLAGS) -Os -c $< -o $@
 
 $(BUILD)/system_info_app.o: kernel/gui/system_info_app.cpp kernel/gui/system_info_app.hpp kernel/gui/app.hpp kernel/graphics/renderer.hpp kernel/arch/pit.hpp kernel/memory/memory.hpp kernel/memory/physical.hpp kernel/memory/heap.hpp kernel/storage/disk.hpp kernel/filesystem/filesystem.hpp | $(BUILD)
 >$(CXX) $(CXXFLAGS) -c $< -o $@
@@ -926,3 +927,11 @@ test-host-editor-state: $(BUILD)/host-editor-state-test
 >$(BUILD)/host-editor-state-test
 
 test-host-graphics: test-host-editor-state
+
+$(BUILD)/host-terminal-editor-integration-test: tests/host/terminal_editor_integration_test.cpp kernel/gui/terminal_app.cpp kernel/gui/terminal_app.hpp kernel/gui/terminal_model.cpp kernel/gui/editor_model.cpp kernel/gui/editor_file.cpp kernel/terminal/shell_session.cpp kernel/terminal/shell_session.hpp kernel/graphics/renderer.cpp kernel/graphics/renderer.hpp kernel/graphics/framebuffer.hpp | $(BUILD)
+>$(CXX) $(HOST_CXXFLAGS) -ffunction-sections -fdata-sections tests/host/terminal_editor_integration_test.cpp kernel/gui/terminal_app.cpp kernel/gui/terminal_model.cpp kernel/gui/editor_model.cpp kernel/gui/editor_file.cpp kernel/terminal/shell_session.cpp kernel/graphics/renderer.cpp -Wl,--gc-sections -o $@
+
+test-host-terminal-editor-integration: $(BUILD)/host-terminal-editor-integration-test
+>$(BUILD)/host-terminal-editor-integration-test
+
+test-host-graphics: test-host-terminal-editor-integration

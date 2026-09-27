@@ -50,6 +50,7 @@ public:
 
     void begin();
     shell::CommandResult on_char(char c);
+    void resume_prompt();
     bool poll();
 
 private:

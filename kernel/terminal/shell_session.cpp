@@ -314,7 +314,7 @@ shell::CommandResult ShellSession::on_char(char c)
         length_ = 0;
         command_[0] = '\0';
 
-        if (!dns_pending_) {
+        if (!dns_pending_ && result.action != shell::CommandAction::OpenEditor) {
             prompt();
         }
         return result;
@@ -356,6 +356,11 @@ shell::CommandResult ShellSession::on_char(char c)
             c);
     }
     return shell::CommandResult{};
+}
+
+void ShellSession::resume_prompt()
+{
+    if (!dns_pending_) prompt();
 }
 
 bool ShellSession::poll()

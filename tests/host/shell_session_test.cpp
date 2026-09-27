@@ -355,6 +355,9 @@ void test_execute_result_propagates_only_from_submitted_command()
     assert(session.on_char('e').action == linux95::shell::CommandAction::Continue);
     assert(session.on_char('\n').action == linux95::shell::CommandAction::OpenEditor);
     assert(strcmp(executor.result.path, "DOCS/NOTES.TXT") == 0);
+    assert(fake.length >= 1 && fake.text[fake.length - 1] == '\n');
+    session.resume_prompt();
+    assert(fake.length >= 9 && strcmp(fake.text + fake.length - 9, "linux95> ") == 0);
     assert(session.on_char('x').action == linux95::shell::CommandAction::Continue);
 }
 
