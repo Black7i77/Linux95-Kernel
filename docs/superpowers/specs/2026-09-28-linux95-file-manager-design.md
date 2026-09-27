@@ -82,7 +82,7 @@ Open a File Manager-owned name dialog. On confirmation, validate the single name
 
 ### New File
 
-Use the same name dialog and validation path, then call `vfs::touch` on the joined path. Duplicate names are rejected by the filesystem and never overwritten. On success refresh and select the new empty file. Do not launch Terminal Editor automatically.
+Use the same name dialog and validation path, then query the joined path with `vfs::stat`. If it exists, report `AlreadyExists` without mutation; if the result is `NotFound`, call `vfs::touch`; any other stat error is reported and aborts creation. This preflight is needed because the existing `touch` API succeeds unchanged for an already-existing regular file. On successful creation refresh and select the new empty file. Do not launch Terminal Editor automatically.
 
 ### Rename
 
