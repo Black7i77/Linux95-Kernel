@@ -14,6 +14,7 @@
 #include "filesystem/vfs.hpp"
 #include "storage/disk.hpp"
 #include "terminal/output.hpp"
+#include "terminal/filesystem_commands.hpp"
 #include "terminal/shell_session.hpp"
 #include "terminal/vga_output.hpp"
 
@@ -86,6 +87,12 @@ void print_help(terminal::Output& output)
     terminal::write(output, "  fsinfo   Show FAT32 filesystem information\n");
     terminal::write(output, "  ls [path] List FAT32 directory\n");
     terminal::write(output, "  cat <path> Read FAT32 file\n");
+    terminal::write(output, "  touch <path> Create a file if absent\n");
+    terminal::write(output, "  mkdir <path> Create a directory\n");
+    terminal::write(output, "  write <path> <data> Replace file contents\n");
+    terminal::write(output, "  rm <path> Remove a file or empty directory\n");
+    terminal::write(output, "  cp <source> <destination> Copy a file\n");
+    terminal::write(output, "  mv <source> <destination> Move or rename\n");
     terminal::write(output, "  uptime   Show uptime in seconds\n");
     terminal::write(output, "  ip       Show network configuration\n");
     terminal::write(output, "  ping <IPv4 address> Send ICMP Echo Request\n");
@@ -434,6 +441,10 @@ void execute_command(
     terminal::Output& output,
     char* command)
 {
+    if (terminal::execute_filesystem_command(output, command)) {
+        return;
+    }
+
     ParsedCommand parsed =
         parse_command(command);
 

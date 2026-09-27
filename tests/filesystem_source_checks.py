@@ -62,15 +62,21 @@ for path in sorted((ROOT / "kernel").rglob("*.cpp")):
         continue
     if re.search(r"\bfat32(?:::|_write)", text):
         raise SystemExit(f"FAIL: FAT32 internals in terminal production: {path}")
+    if re.search(r"\b(?:storage::(?:read_sector|write_sector)|ata::(?:read_sector|write_sector))\s*\(", text):
+        raise SystemExit(f"FAIL: sector I/O in terminal production: {path}")
     if re.search(r"\bfilesystem::(?:touch|write_file|mkdir|remove|copy_file|move)\s*\(", text):
         raise SystemExit(f"FAIL: terminal mutation bypasses VFS: {path}")
 
 command_source = ROOT / "kernel" / "terminal" / "filesystem_commands.cpp"
-if command_source.exists():
-    command_text = command_source.read_text()
-    for operation in ("touch", "write_file", "mkdir", "remove", "copy_file", "move"):
-        if f"filesystem::vfs::{operation}(" not in command_text:
-            raise SystemExit(f"FAIL: terminal command missing VFS dispatch: {operation}")
+if not command_source.exists():
+    raise SystemExit("FAIL: terminal command module missing")
+command_text = command_source.read_text()
+for operation in ("touch", "write_file", "mkdir", "remove", "copy_file", "move"):
+    if not re.search(rf"\bfilesystem::vfs::{operation}\s*\(", command_text):
+        raise SystemExit(f"FAIL: terminal command missing VFS dispatch: {operation}")
+if '#include "terminal/filesystem_commands.hpp"' not in shell or \
+        "terminal::execute_filesystem_command(output, command)" not in shell:
+    raise SystemExit("FAIL: shell does not dispatch writable filesystem commands")
 
 writer = (FS / "fat32_write.cpp").read_text()
 write_calls = list(re.finditer(r"storage::write_sector\s*\(", writer))

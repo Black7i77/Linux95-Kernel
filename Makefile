@@ -103,7 +103,8 @@ KERNEL_OBJS := \
 	$(BUILD)/vfs.o \
 	$(BUILD)/filesystem_self_test.o \
 	$(BUILD)/vfs_self_test.o \
-	$(BUILD)/shell.o
+	$(BUILD)/shell.o \
+	$(BUILD)/filesystem_commands.o
 
 NETWORK_TEST_OBJS := $(subst $(BUILD)/kernel.o,$(BUILD)/kernel-network-test.o,$(KERNEL_OBJS))
 NETWORK_TEST_IMAGE := $(BUILD)/linux95-kernel-network-test.img
@@ -537,18 +538,22 @@ $(BUILD)/host-vfs-test: \
 $(BUILD)/host-filesystem-write-test: tests/host/filesystem_write_test.cpp kernel/filesystem/filesystem.cpp kernel/filesystem/filesystem.hpp kernel/filesystem/vfs.cpp kernel/filesystem/vfs.hpp kernel/filesystem/fat32.hpp kernel/filesystem/fat32_write.hpp kernel/storage/disk.cpp kernel/storage/disk.hpp | $(BUILD)
 >$(CXX) $(HOST_CXXFLAGS) tests/host/filesystem_write_test.cpp kernel/filesystem/filesystem.cpp kernel/filesystem/vfs.cpp kernel/storage/disk.cpp -o $@
 
+$(BUILD)/host-filesystem-command-test: tests/host/filesystem_command_test.cpp kernel/terminal/filesystem_commands.cpp kernel/terminal/filesystem_commands.hpp kernel/filesystem/vfs.hpp kernel/terminal/output.hpp kernel/terminal/shell_session.hpp kernel/terminal/shell_session.cpp | $(BUILD)
+>$(CXX) $(HOST_CXXFLAGS) tests/host/filesystem_command_test.cpp kernel/terminal/filesystem_commands.cpp kernel/terminal/shell_session.cpp -o $@
+
 $(BUILD)/host-framebuffer-helpers-test: tests/host/framebuffer_helpers_test.cpp kernel/graphics/framebuffer_helpers.hpp kernel/boot_info.hpp | $(BUILD)
 >$(CXX) $(HOST_CXXFLAGS) $< -o $@
 
 test-host-graphics: $(BUILD)/host-framebuffer-helpers-test
 >$(BUILD)/host-framebuffer-helpers-test
 
-test-host-filesystem: $(BUILD)/host-fat32-helpers-test $(BUILD)/host-fat32-mount-test $(BUILD)/host-vfs-test $(BUILD)/host-fat32-write-test $(BUILD)/host-filesystem-write-test
+test-host-filesystem: $(BUILD)/host-fat32-helpers-test $(BUILD)/host-fat32-mount-test $(BUILD)/host-vfs-test $(BUILD)/host-fat32-write-test $(BUILD)/host-filesystem-write-test $(BUILD)/host-filesystem-command-test
 >$(BUILD)/host-fat32-helpers-test
 >$(BUILD)/host-fat32-mount-test
 >$(BUILD)/host-vfs-test
 >$(BUILD)/host-fat32-write-test
 >$(BUILD)/host-filesystem-write-test
+>$(BUILD)/host-filesystem-command-test
 
 $(BUILD)/heap.o: kernel/memory/heap.cpp kernel/memory/heap.hpp | $(BUILD)
 >$(CXX) $(CXXFLAGS) -c $< -o $@
@@ -588,10 +593,14 @@ $(BUILD)/storage_self_test.o: kernel/storage/storage_self_test.cpp kernel/storag
 $(BUILD)/shell.o: \
 	kernel/terminal/shell.cpp \
 	kernel/terminal/shell.hpp \
+	kernel/terminal/filesystem_commands.hpp \
 	kernel/filesystem/vfs.hpp \
 	kernel/net/network.hpp \
 	kernel/net/dns.hpp \
 	kernel/terminal/shell_session.hpp | $(BUILD)
+>$(CXX) $(CXXFLAGS) -c $< -o $@
+
+$(BUILD)/filesystem_commands.o: kernel/terminal/filesystem_commands.cpp kernel/terminal/filesystem_commands.hpp kernel/filesystem/vfs.hpp kernel/terminal/output.hpp | $(BUILD)
 >$(CXX) $(CXXFLAGS) -c $< -o $@
 
 $(BUILD)/kernel.elf: $(KERNEL_OBJS) linker.ld
