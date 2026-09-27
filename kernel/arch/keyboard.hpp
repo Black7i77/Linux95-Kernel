@@ -28,9 +28,4 @@ void on_irq();
 bool has_event();
 KeyEvent read_event();
 
-// Transitional compatibility for existing callers; removed when all callers
-// migrate to KeyEvent routing.
-bool has_char();
-char read_char();
-
 } // namespace linux95::keyboard

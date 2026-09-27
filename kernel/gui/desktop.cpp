@@ -1369,9 +1369,8 @@ void process_mouse_event(
 void process_keyboard(
     RuntimeState& state)
 {
-    while (keyboard::has_char()) {
-        const char c =
-            keyboard::read_char();
+    while (keyboard::has_event()) {
+        const keyboard::KeyEvent event = keyboard::read_event();
 
         const gui::WindowId focused =
             state.windows.focused();
@@ -1381,7 +1380,7 @@ void process_keyboard(
                 state.windows,
                 state.terminal,
                 state.system_info,
-                c) &&
+                event) &&
             focused ==
                 kTerminalWindowId) {
             invalidate_window(
@@ -1558,7 +1557,7 @@ bool route_key(
     const gui::WindowManager& windows,
     gui::AppInstance& terminal,
     gui::AppInstance& system_info,
-    char c)
+    const keyboard::KeyEvent& event)
 {
     const gui::WindowId focused =
         windows.focused();
@@ -1593,7 +1592,7 @@ bool route_key(
 
     app->callbacks.on_key(
         app->context,
-        c);
+        event);
 
     return true;
 }
@@ -1804,7 +1803,7 @@ graphics::Rect DirtyRegionQueue::rect(
             }
         }
 
-        if (keyboard::has_char()) {
+        if (keyboard::has_event()) {
             had_event = true;
             process_keyboard(state);
         }

@@ -1,4 +1,5 @@
 #include "terminal/shell.hpp"
+#include "terminal/key_event_adapter.hpp"
 
 #include "arch/io.hpp"
 #include "arch/keyboard.hpp"
@@ -586,13 +587,14 @@ void execute_session_command(
         net::dns::poll();
         (void)session.poll();
 
-        if (!keyboard::has_char()) {
+        if (!keyboard::has_event()) {
             io::halt();
             continue;
         }
 
-        session.on_char(
-            keyboard::read_char());
+        const keyboard::KeyEvent event = keyboard::read_event();
+        char c = 0;
+        if (terminal::shell_character_for_key(event, c)) session.on_char(c);
     }
 }
 

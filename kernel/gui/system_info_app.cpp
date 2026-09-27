@@ -311,7 +311,7 @@ void SystemInfoApp::draw(
 }
 
 void SystemInfoApp::on_key(
-    char)
+    const keyboard::KeyEvent&)
 {
 }
 
@@ -336,14 +336,14 @@ void SystemInfoApp::draw_callback(
 
 void SystemInfoApp::key_callback(
     void* context,
-    char c)
+    const keyboard::KeyEvent& event)
 {
     if (context == nullptr) {
         return;
     }
 
     static_cast<SystemInfoApp*>(
-        context)->on_key(c);
+        context)->on_key(event);
 }
 
 void SystemInfoApp::close_callback(

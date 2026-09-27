@@ -4,6 +4,7 @@
 #include "net/network.hpp"
 #include "net/dns.hpp"
 #include "terminal/shell.hpp"
+#include "terminal/key_event_adapter.hpp"
 
 #include <stddef.h>
 #include <stdint.h>
@@ -236,9 +237,10 @@ void TerminalApp::draw(
 }
 
 void TerminalApp::on_key(
-    char c)
+    const keyboard::KeyEvent& event)
 {
-    session_.on_char(c);
+    char c = 0;
+    if (terminal::shell_character_for_key(event, c)) session_.on_char(c);
 }
 
 void TerminalApp::on_close()
@@ -262,14 +264,14 @@ void TerminalApp::draw_callback(
 
 void TerminalApp::key_callback(
     void* context,
-    char c)
+    const keyboard::KeyEvent& event)
 {
     if (context == nullptr) {
         return;
     }
 
     static_cast<TerminalApp*>(
-        context)->on_key(c);
+        context)->on_key(event);
 }
 
 void TerminalApp::close_callback(
