@@ -44,7 +44,8 @@ void test_content_coordinates_and_button_state_are_routed()
     const gui::Rect content{100, 104, 300, 196};
 
     assert(desktop::route_mouse(
-        windows, 7, app, content, gui::Point{137, 129}, true, false, true));
+        windows, 7, app, content, gui::Point{137, 129},
+        true, false, true, false));
     assert(capture.calls == 1);
     assert(capture.event.x == 37);
     assert(capture.event.y == 25);
@@ -53,7 +54,8 @@ void test_content_coordinates_and_button_state_are_routed()
     assert(capture.event.left_down);
 
     assert(desktop::route_mouse(
-        windows, 7, app, content, gui::Point{140, 132}, false, true, false));
+        windows, 7, app, content, gui::Point{140, 132},
+        false, true, false, false));
     assert(capture.calls == 2);
     assert(capture.event.x == 40);
     assert(capture.event.y == 28);
@@ -71,7 +73,7 @@ void test_null_callback_is_harmless()
     gui::AppInstance app{nullptr, gui::AppCallbacks{nullptr, nullptr, nullptr, nullptr}};
     assert(!desktop::route_mouse(
         windows, 7, app, gui::Rect{100, 104, 300, 196},
-        gui::Point{137, 129}, true, false, true));
+        gui::Point{137, 129}, true, false, true, false));
 }
 
 void test_chrome_panel_outside_content_and_unfocused_apps_do_not_route()
@@ -86,12 +88,32 @@ void test_chrome_panel_outside_content_and_unfocused_apps_do_not_route()
     const gui::Rect content{100, 104, 300, 196};
 
     assert(!desktop::route_mouse(
-        windows, 7, app, content, gui::Point{110, 90}, true, false, true));
+        windows, 7, app, content, gui::Point{110, 90},
+        true, false, true, false));
     assert(!desktop::route_mouse(
-        windows, 7, app, content, gui::Point{10, 10}, true, false, true));
+        windows, 7, app, content, gui::Point{10, 10},
+        true, false, true, false));
     assert(!desktop::route_mouse(
         windows, 8, app, gui::Rect{450, 104, 300, 196},
-        gui::Point{470, 120}, true, false, true));
+        gui::Point{470, 120}, true, false, true, false));
+    assert(capture.calls == 0);
+}
+
+void test_pointer_owned_by_resize_or_drag_does_not_route_to_app()
+{
+    gui::WindowManager windows;
+    assert(windows.add_window(7, gui::Rect{100, 80, 300, 220}, true, true));
+    assert(windows.focus(7));
+
+    MouseCapture capture;
+    gui::AppInstance app = app_for(capture);
+    const gui::Rect content{100, 104, 300, 196};
+
+    // The point is within the content rectangle, but the desktop chrome has
+    // claimed this pointer action for a resize/drag.
+    assert(!desktop::route_mouse(
+        windows, 7, app, content, gui::Point{397, 297},
+        true, false, true, true));
     assert(capture.calls == 0);
 }
 
@@ -102,4 +124,5 @@ int main()
     test_content_coordinates_and_button_state_are_routed();
     test_null_callback_is_harmless();
     test_chrome_panel_outside_content_and_unfocused_apps_do_not_route();
+    test_pointer_owned_by_resize_or_drag_does_not_route_to_app();
 }

@@ -1387,7 +1387,9 @@ void process_mouse_event(
                 state.mouse_position,
                 pressed,
                 released,
-                event.left);
+                event.left,
+                pointer_action_active ||
+                    state.pointer_window != 0);
         }
     }
 
@@ -1632,12 +1634,14 @@ bool route_mouse(
     gui::Point screen_point,
     bool left_pressed,
     bool left_released,
-    bool left_down)
+    bool left_down,
+    bool pointer_owned_by_chrome)
 {
     const gui::Window* window =
         windows.find(target);
 
     if (
+        pointer_owned_by_chrome ||
         windows.focused() != target ||
         window == nullptr ||
         window->state != gui::WindowState::Open ||

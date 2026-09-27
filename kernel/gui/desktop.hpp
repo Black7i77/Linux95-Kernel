@@ -78,7 +78,8 @@ bool route_mouse(
     gui::Point screen_point,
     bool left_pressed,
     bool left_released,
-    bool left_down);
+    bool left_down,
+    bool pointer_owned_by_chrome);
 
 gui::Rect content_rect(
     gui::Rect bounds);
