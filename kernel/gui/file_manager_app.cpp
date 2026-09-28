@@ -119,7 +119,35 @@ Layout layout(graphics::Rect content, size_t entry_count, ViewMode view)
     return result;
 }
 
+int hit_test(graphics::Rect content, size_t entry_count, ViewMode view,
+    int32_t x, int32_t y, int selected_index);
+
 int hit_test(graphics::Rect content, size_t entry_count, ViewMode view, int32_t x, int32_t y)
+{
+    return hit_test(content, entry_count, view, x, y, -1);
+}
+
+size_t first_visible_entry(graphics::Rect content, size_t entry_count, ViewMode view, int selected_index)
+{
+    const Layout areas = layout(content, entry_count, view);
+    size_t page_capacity = 0;
+    if (view == ViewMode::Details) {
+        page_capacity = areas.entries.height > 0
+            ? static_cast<size_t>(areas.entries.height / 18) : 0;
+    } else {
+        const size_t columns = areas.entries.width > 0
+            ? static_cast<size_t>(areas.entries.width / 80) : 0;
+        const size_t rows = areas.entries.height > 0
+            ? static_cast<size_t>(areas.entries.height / 52) : 0;
+        page_capacity = columns * rows;
+    }
+    if (page_capacity == 0 || selected_index < 0 ||
+        static_cast<size_t>(selected_index) < page_capacity) return 0;
+    return (static_cast<size_t>(selected_index) / page_capacity) * page_capacity;
+}
+
+int hit_test(graphics::Rect content, size_t entry_count, ViewMode view,
+    int32_t x, int32_t y, int selected_index)
 {
     if (entry_count > kMaxEntries) entry_count = kMaxEntries;
     const Layout areas = layout(content, entry_count, view);
@@ -127,10 +155,10 @@ int hit_test(graphics::Rect content, size_t entry_count, ViewMode view, int32_t 
     if (entry_count == 0 || bounds.width <= 0 || bounds.height <= 0 ||
         x < bounds.x || y < bounds.y || x >= bounds.x + bounds.width || y >= bounds.y + bounds.height) return -1;
 
-    size_t index = 0;
+    size_t slot = 0;
     if (view == ViewMode::Details) {
         const int32_t row_height = 18;
-        index = static_cast<size_t>((y - bounds.y) / row_height);
+        slot = static_cast<size_t>((y - bounds.y) / row_height);
         if ((y - bounds.y) / row_height >= bounds.height / row_height) return -1;
     } else {
         const int32_t columns = bounds.width / 80;
@@ -138,8 +166,9 @@ int hit_test(graphics::Rect content, size_t entry_count, ViewMode view, int32_t 
         const int32_t column = (x - bounds.x) / 80;
         const int32_t row = (y - bounds.y) / 52;
         if (column >= columns || row >= bounds.height / 52) return -1;
-        index = static_cast<size_t>(row * columns + column);
+        slot = static_cast<size_t>(row * columns + column);
     }
+    const size_t index = first_visible_entry(content, entry_count, view, selected_index) + slot;
     return index < entry_count ? static_cast<int>(index) : -1;
 }
 
@@ -169,8 +198,11 @@ void fill_clipped(graphics::Framebuffer& framebuffer, graphics::Rect clip, graph
 void text_clipped(graphics::Framebuffer& framebuffer, graphics::Rect clip, int32_t x, int32_t y,
     const char* text, graphics::Color color)
 {
-    if (!text || y < clip.y || y + 8 > clip.y + clip.height) return;
-    size_t max_chars = x < clip.x ? 0 : static_cast<size_t>((clip.x + clip.width - x) / 8);
+    if (!text || clip.width <= 0 || y < clip.y || y + 8 > clip.y + clip.height ||
+        x < clip.x || x >= clip.x + clip.width) return;
+    const int32_t remaining_width = clip.x + clip.width - x;
+    if (remaining_width <= 0) return;
+    const size_t max_chars = static_cast<size_t>(remaining_width / 8);
     for (size_t i = 0; text[i] && i < max_chars; ++i) graphics::draw_char(framebuffer, x + static_cast<int32_t>(i * 8), y, text[i], color);
 }
 
@@ -231,7 +263,17 @@ void FileManagerApp::draw(graphics::Framebuffer& framebuffer, graphics::Rect con
     text_clipped(framebuffer, content, content.x + 4, content.y + 52, model_.current_path(), black);
 
     fill_clipped(framebuffer, content, areas.entries, white);
-    for (size_t i = 0; i < model_.entry_count(); ++i) {
+    const size_t visible_start = presentation::first_visible_entry(
+        content, model_.entry_count(), model_.view_mode(), model_.selected_index());
+    const size_t visible_capacity = model_.view_mode() == ViewMode::Details
+        ? (areas.entries.height > 0 ? static_cast<size_t>(areas.entries.height / 18) : 0)
+        : (areas.entries.width > 0 ? static_cast<size_t>(areas.entries.width / 80) : 0) *
+          (areas.entries.height > 0 ? static_cast<size_t>(areas.entries.height / 52) : 0);
+    const size_t remaining_entries = model_.entry_count() - visible_start;
+    const size_t visible_count = remaining_entries < visible_capacity
+        ? remaining_entries : visible_capacity;
+    for (size_t slot = 0; slot < visible_count; ++slot) {
+        const size_t i = visible_start + slot;
         const auto* entry = model_.entry(i);
         if (!entry) continue;
         const bool selected = model_.selected_index() == static_cast<int>(i);
@@ -255,15 +297,15 @@ void FileManagerApp::draw(graphics::Framebuffer& framebuffer, graphics::Rect con
                 if (n + 2 < sizeof(label)) { label[n++] = ' '; label[n++] = 'B'; }
             }
             label[n] = '\0';
-            const int32_t row_y = areas.entries.y + static_cast<int32_t>(i * 18);
+            const int32_t row_y = areas.entries.y + static_cast<int32_t>(slot * 18);
             if (row_y + 18 > areas.entries.y + areas.entries.height) continue;
             if (selected) fill_clipped(framebuffer, content, graphics::Rect{areas.entries.x, row_y, areas.entries.width, 18}, navy);
             text_clipped(framebuffer, content, areas.entries.x + 4, row_y + 5, label, selected ? white : black);
         } else {
             const int32_t columns = areas.entries.width / 80;
             if (columns <= 0) continue;
-            const int32_t cell_x = areas.entries.x + static_cast<int32_t>((i % static_cast<size_t>(columns)) * 80);
-            const int32_t cell_y = areas.entries.y + static_cast<int32_t>((i / static_cast<size_t>(columns)) * 52);
+            const int32_t cell_x = areas.entries.x + static_cast<int32_t>((slot % static_cast<size_t>(columns)) * 80);
+            const int32_t cell_y = areas.entries.y + static_cast<int32_t>((slot / static_cast<size_t>(columns)) * 52);
             if (cell_y + 52 > areas.entries.y + areas.entries.height) continue;
             if (selected) fill_clipped(framebuffer, content, graphics::Rect{cell_x, cell_y, 80, 52}, graphics::Color{0, 0, 192});
             const graphics::Color icon_color = entry->is_directory ? graphics::Color{224, 176, 0} : graphics::Color{64, 96, 192};
@@ -397,7 +439,7 @@ void FileManagerApp::on_mouse(const AppMouseEvent& event)
         if (g_content_width <= 0 || g_content_height <= 0) return;
         const int index = presentation::hit_test(
             graphics::Rect{0, 0, g_content_width, g_content_height}, model_.entry_count(),
-            model_.view_mode(), event.x, event.y);
+            model_.view_mode(), event.x, event.y, model_.selected_index());
         if (index >= 0) model_.select(static_cast<size_t>(index));
         return;
     }

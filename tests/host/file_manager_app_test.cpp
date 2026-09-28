@@ -23,6 +23,8 @@ struct Layout {
 
 Layout layout(graphics::Rect content, size_t entry_count, ViewMode view);
 int hit_test(graphics::Rect content, size_t entry_count, ViewMode view, int32_t x, int32_t y);
+int hit_test(graphics::Rect content, size_t entry_count, ViewMode view, int32_t x, int32_t y, int selected_index);
+size_t first_visible_entry(graphics::Rect content, size_t entry_count, ViewMode view, int selected_index);
 bool format_delete_confirmation(const char* name, char* output, size_t capacity);
 
 } // namespace linux95::gui::file_manager::presentation
@@ -329,6 +331,51 @@ void test_delete_confirmation_message_is_not_overpainted_by_buttons()
     assert(geometry.cancel_button.y + geometry.cancel_button.height <= geometry.status.y);
 }
 
+void test_scrolling_keeps_selection_visible_in_both_views()
+{
+    file_manager_fake_vfs::reset();
+    char name[13]{};
+    for (unsigned i = 0; i < 40; ++i) {
+        name[0] = 'F';
+        name[1] = static_cast<char>('0' + (i / 10));
+        name[2] = static_cast<char>('0' + (i % 10));
+        name[3] = '.';
+        name[4] = 'T';
+        name[5] = 'X';
+        name[6] = 'T';
+        name[7] = '\0';
+        file_manager_fake_vfs::add("/", name, false, i);
+    }
+    gui::file_manager::FileManagerApp app;
+    assert(app.open() == filesystem::Status::Ok);
+    const graphics::Rect content{0, 0, 320, 300};
+    gui::AppInstance instance = app.instance();
+    for (int i = 0; i <= 20; ++i) {
+        send_key(instance, keyboard::KeyCode::ArrowDown);
+    }
+    assert(app.model().selected_index() == 20);
+    const size_t details_start = gui::file_manager::presentation::first_visible_entry(
+        content, app.model().entry_count(), gui::file_manager::ViewMode::Details, 20);
+    assert(details_start <= 20);
+    assert(gui::file_manager::presentation::hit_test(
+        content, app.model().entry_count(), gui::file_manager::ViewMode::Details,
+        4, 64 + static_cast<int32_t>((20 - details_start) * 18) + 4, 20) == 20);
+
+    send_key(instance, keyboard::KeyCode::Character, 'v', true);
+    assert(app.model().selected_index() == 20);
+    const size_t icons_start = gui::file_manager::presentation::first_visible_entry(
+        content, app.model().entry_count(), gui::file_manager::ViewMode::Icons, 20);
+    assert(icons_start <= 20);
+    const int32_t columns = gui::file_manager::presentation::layout(
+        content, app.model().entry_count(), gui::file_manager::ViewMode::Icons).entries.width / 80;
+    const size_t slot = 20 - icons_start;
+    const int32_t x = static_cast<int32_t>(slot % static_cast<size_t>(columns)) * 80 + 4;
+    const int32_t y = 64 + static_cast<int32_t>(slot / static_cast<size_t>(columns)) * 52 + 4;
+    assert(gui::file_manager::presentation::hit_test(
+        content, app.model().entry_count(), gui::file_manager::ViewMode::Icons,
+        x, y, 20) == 20);
+}
+
 } // namespace
 
 int main()
@@ -347,4 +394,5 @@ int main()
     test_entry_hit_testing_clips_and_rejects_small_or_outside_bounds();
     test_delete_confirmation_identifies_selected_entry();
     test_delete_confirmation_message_is_not_overpainted_by_buttons();
+    test_scrolling_keeps_selection_visible_in_both_views();
 }

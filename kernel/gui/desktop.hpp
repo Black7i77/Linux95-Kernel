@@ -100,7 +100,9 @@ bool route_mouse_after_chrome(
     bool left_released,
     bool left_down,
     bool pointer_action_was_active,
-    gui::WindowId pointer_window_after_chrome);
+    gui::WindowId pointer_window_after_chrome,
+    bool chrome_event_consumed = false,
+    class DirtyRegionQueue* dirty_regions = nullptr);
 
 gui::Rect content_rect(
     gui::Rect bounds);

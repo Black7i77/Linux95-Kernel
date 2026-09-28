@@ -1177,7 +1177,7 @@ bool handle_panel_or_menu_click(
     return true;
 }
 
-void handle_window_mouse_down(
+bool handle_window_mouse_down(
     RuntimeState& state,
     gui::Point point)
 {
@@ -1186,14 +1186,14 @@ void handle_window_mouse_down(
             point);
 
     if (id == 0) {
-        return;
+        return false;
     }
 
     const gui::Window* window =
         state.windows.find(id);
 
     if (window == nullptr) {
-        return;
+        return false;
     }
 
     const ChromeHit hit =
@@ -1233,7 +1233,7 @@ void handle_window_mouse_down(
             invalidate_panel(state);
         }
 
-        return;
+        return true;
     }
 
     if (
@@ -1255,7 +1255,7 @@ void handle_window_mouse_down(
             invalidate_panel(state);
         }
 
-        return;
+        return true;
     }
 
     if (
@@ -1272,7 +1272,7 @@ void handle_window_mouse_down(
             state.pointer_window = id;
         }
 
-        return;
+        return true;
     }
 
     if (
@@ -1289,7 +1289,7 @@ void handle_window_mouse_down(
             state.pointer_window = id;
         }
 
-        return;
+        return true;
     }
 
     if (
@@ -1299,6 +1299,7 @@ void handle_window_mouse_down(
             state,
             id);
     }
+    return hit != ChromeHit::Content;
 }
 
 void process_mouse_event(
@@ -1371,12 +1372,14 @@ void process_mouse_event(
         !event.left &&
         state.left_down;
 
+    bool chrome_event_consumed = false;
     if (pressed) {
-        if (
-            !handle_panel_or_menu_click(
+        chrome_event_consumed =
+            handle_panel_or_menu_click(
                 state,
-                state.mouse_position)) {
-            handle_window_mouse_down(
+                state.mouse_position);
+        if (!chrome_event_consumed) {
+            chrome_event_consumed = handle_window_mouse_down(
                 state,
                 state.mouse_position);
         }
@@ -1412,7 +1415,9 @@ void process_mouse_event(
                 released,
                 event.left,
                 pointer_action_active,
-                state.pointer_window);
+                state.pointer_window,
+                chrome_event_consumed,
+                &state.dirty);
         }
     }
 
@@ -1725,15 +1730,18 @@ bool route_mouse_after_chrome(
     bool left_released,
     bool left_down,
     bool pointer_action_was_active,
-    gui::WindowId pointer_window_after_chrome)
+    gui::WindowId pointer_window_after_chrome,
+    bool chrome_event_consumed,
+    DirtyRegionQueue* dirty_regions)
 {
     if (
+        chrome_event_consumed ||
         pointer_action_was_active ||
         pointer_window_after_chrome != 0) {
         return false;
     }
 
-    return route_mouse(
+    const bool delivered = route_mouse(
         windows,
         target,
         app,
@@ -1742,6 +1750,18 @@ bool route_mouse_after_chrome(
         left_pressed,
         left_released,
         left_down);
+    if (delivered && dirty_regions != nullptr) {
+        const gui::Window* window = windows.find(target);
+        if (window != nullptr) {
+            dirty_regions->invalidate(graphics::Rect{
+                window->bounds.x,
+                window->bounds.y,
+                window->bounds.width,
+                window->bounds.height,
+            });
+        }
+    }
+    return delivered;
 }
 
 gui::Rect content_rect(

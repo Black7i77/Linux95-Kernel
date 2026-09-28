@@ -124,6 +124,45 @@ void test_pointer_owned_by_resize_or_drag_does_not_route_to_app()
     assert(capture.calls == 0);
 }
 
+void test_consumed_chrome_action_cannot_fall_through_to_new_focus()
+{
+    gui::WindowManager windows;
+    assert(windows.add_window(7, gui::Rect{100, 80, 300, 220}, true, true));
+    assert(windows.add_window(8, gui::Rect{150, 100, 300, 220}, true, true));
+    assert(windows.focus(7));
+    assert(windows.close(7));
+
+    MouseCapture capture;
+    gui::AppInstance app = app_for(capture);
+    desktop::DirtyRegionQueue dirty;
+    assert(!desktop::route_mouse_after_chrome(
+        windows, 8, app, gui::Rect{150, 124, 300, 196},
+        gui::Point{170, 130}, true, false, true,
+        false, 0, true, &dirty));
+    assert(capture.calls == 0);
+    assert(dirty.size() == 0);
+}
+
+void test_routed_app_mouse_event_invalidates_window_for_redraw()
+{
+    gui::WindowManager windows;
+    assert(windows.add_window(7, gui::Rect{100, 80, 300, 220}, true, true));
+    assert(windows.focus(7));
+
+    MouseCapture capture;
+    gui::AppInstance app = app_for(capture);
+    desktop::DirtyRegionQueue dirty;
+    assert(desktop::route_mouse_after_chrome(
+        windows, 7, app, gui::Rect{100, 104, 300, 196},
+        gui::Point{137, 129}, true, false, true,
+        false, 0, false, &dirty));
+    assert(capture.calls == 1);
+    assert(dirty.size() == 1);
+    const graphics::Rect invalidated = dirty.rect(0);
+    assert(invalidated.x == 100 && invalidated.y == 80);
+    assert(invalidated.width == 300 && invalidated.height == 220);
+}
+
 } // namespace
 
 int main()
@@ -132,4 +171,6 @@ int main()
     test_null_callback_is_harmless();
     test_chrome_panel_outside_content_and_unfocused_apps_do_not_route();
     test_pointer_owned_by_resize_or_drag_does_not_route_to_app();
+    test_consumed_chrome_action_cannot_fall_through_to_new_focus();
+    test_routed_app_mouse_event_invalidates_window_for_redraw();
 }

@@ -973,8 +973,12 @@ test-host-file-manager-app: $(BUILD)/host-file-manager-app-test
 $(BUILD)/host-file-manager-render-test: tests/host/file_manager_app_test.cpp tests/host/file_manager_fake_vfs.cpp kernel/gui/file_manager_model.cpp kernel/gui/file_manager_app.cpp kernel/gui/desktop.cpp kernel/gui/window_manager.cpp kernel/graphics/renderer.cpp kernel/gui/desktop.hpp kernel/gui/file_manager_model.hpp kernel/gui/file_manager_app.hpp | $(BUILD)
 >$(CXX) $(HOST_CXXFLAGS) -ffunction-sections -fdata-sections tests/host/file_manager_app_test.cpp tests/host/file_manager_fake_vfs.cpp kernel/gui/file_manager_model.cpp kernel/gui/file_manager_app.cpp kernel/gui/desktop.cpp kernel/gui/window_manager.cpp kernel/graphics/renderer.cpp -Wl,--gc-sections -o $@
 
-test-host-file-manager-render: $(BUILD)/host-file-manager-render-test
+$(BUILD)/host-file-manager-clip-test: tests/host/file_manager_clip_test.cpp tests/host/file_manager_fake_vfs.cpp kernel/gui/file_manager_model.cpp kernel/gui/file_manager_app.cpp kernel/gui/desktop.cpp kernel/gui/window_manager.cpp kernel/graphics/renderer.cpp kernel/gui/file_manager_app.hpp kernel/gui/desktop.hpp | $(BUILD)
+>$(CXX) $(HOST_CXXFLAGS) -Itests/host -ffunction-sections -fdata-sections tests/host/file_manager_clip_test.cpp tests/host/file_manager_fake_vfs.cpp kernel/gui/file_manager_model.cpp kernel/gui/file_manager_app.cpp kernel/gui/desktop.cpp kernel/gui/window_manager.cpp kernel/graphics/renderer.cpp -Wl,--gc-sections -o $@
+
+test-host-file-manager-render: $(BUILD)/host-file-manager-render-test $(BUILD)/host-file-manager-clip-test
 >$(BUILD)/host-file-manager-render-test
+>$(BUILD)/host-file-manager-clip-test
 
 test-host-file-manager-image-checks:
 >$(PYTHON) tests/file_manager_image_checks_test.py
