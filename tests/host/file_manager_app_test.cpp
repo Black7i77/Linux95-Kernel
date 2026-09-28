@@ -17,6 +17,8 @@ struct Layout {
     graphics::Rect entries;
     graphics::Rect status;
     graphics::Rect dialog;
+    graphics::Rect delete_button;
+    graphics::Rect cancel_button;
 };
 
 Layout layout(graphics::Rect content, size_t entry_count, ViewMode view);
@@ -315,6 +317,18 @@ void test_delete_confirmation_identifies_selected_entry()
     assert(too_small[0] == '\0');
 }
 
+void test_delete_confirmation_message_is_not_overpainted_by_buttons()
+{
+    const graphics::Rect content{0, 0, 320, 140};
+    const auto geometry = gui::file_manager::presentation::layout(
+        content, 1, gui::file_manager::ViewMode::Icons);
+    const int32_t message_bottom = geometry.dialog.y + 14;
+    assert(geometry.delete_button.y >= message_bottom);
+    assert(geometry.cancel_button.y >= message_bottom);
+    assert(geometry.delete_button.y + geometry.delete_button.height <= geometry.status.y);
+    assert(geometry.cancel_button.y + geometry.cancel_button.height <= geometry.status.y);
+}
+
 } // namespace
 
 int main()
@@ -332,4 +346,5 @@ int main()
     test_views_share_entries_and_selection_and_toggle_preserves_navigation();
     test_entry_hit_testing_clips_and_rejects_small_or_outside_bounds();
     test_delete_confirmation_identifies_selected_entry();
+    test_delete_confirmation_message_is_not_overpainted_by_buttons();
 }

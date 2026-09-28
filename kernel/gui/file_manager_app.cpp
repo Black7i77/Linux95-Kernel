@@ -8,7 +8,6 @@ namespace {
 
 constexpr int32_t kToolbarHeight = 24;
 constexpr int32_t kDialogTop = 56;
-constexpr int32_t kDialogBottom = 96;
 
 size_t name_length(const char* value)
 {
@@ -69,6 +68,8 @@ struct Layout {
     graphics::Rect entries;
     graphics::Rect status;
     graphics::Rect dialog;
+    graphics::Rect delete_button;
+    graphics::Rect cancel_button;
 };
 
 bool format_delete_confirmation(const char* name, char* output, size_t capacity)
@@ -101,8 +102,16 @@ Layout layout(graphics::Rect content, size_t entry_count, ViewMode view)
     const int32_t entries_bottom = bottom > content.y + 20 ? bottom - 20 : entries_top;
     result.entries = graphics::Rect{content.x, entries_top, content.width, entries_bottom > entries_top ? entries_bottom - entries_top : 0};
     result.status = graphics::Rect{content.x, bottom > content.y + 20 ? bottom - 20 : content.y, content.width, content.height < 20 ? content.height : 20};
-    result.dialog = graphics::Rect{content.x + 12, content.y + kDialogTop, content.width > 24 ? content.width - 24 : 0,
-        content.height > kDialogTop ? (content.height - kDialogTop < 40 ? content.height - kDialogTop : 40) : 0};
+    const int32_t dialog_height = content.height > kDialogTop + 20
+        ? (content.height - kDialogTop - 20 < 72 ? content.height - kDialogTop - 20 : 72)
+        : 0;
+    result.dialog = graphics::Rect{content.x + 12, content.y + kDialogTop,
+        content.width > 24 ? content.width - 24 : 0, dialog_height};
+    if (dialog_height >= 40) {
+        const int32_t button_y = content.y + kDialogTop + dialog_height - 26;
+        result.delete_button = graphics::Rect{content.x + 24, button_y, 80, 22};
+        result.cancel_button = graphics::Rect{content.x + 112, button_y, 80, 22};
+    }
     if (view == ViewMode::Icons && result.entries.width > 0 && result.entries.height > 0) {
         const int32_t columns = result.entries.width / 80;
         if (columns == 0) result.entries.width = 0;
@@ -285,10 +294,11 @@ void FileManagerApp::draw(graphics::Framebuffer& framebuffer, graphics::Rect con
         text_clipped(framebuffer, content, areas.dialog.x + 8, areas.dialog.y + 6,
             dialog_mode_ == DialogMode::Name ? name_buffer_ : "Delete selected entry?", white);
         }
-        fill_clipped(framebuffer, content, graphics::Rect{content.x + 24, content.y + 58, 80, 24}, cyan);
-        fill_clipped(framebuffer, content, graphics::Rect{content.x + 112, content.y + 58, 80, 24}, cyan);
-        text_clipped(framebuffer, content, content.x + 36, content.y + 66, "OK / Delete", white);
-        text_clipped(framebuffer, content, content.x + 124, content.y + 66, "Cancel", white);
+        fill_clipped(framebuffer, content, areas.delete_button, cyan);
+        fill_clipped(framebuffer, content, areas.cancel_button, cyan);
+        text_clipped(framebuffer, content, areas.delete_button.x + 8, areas.delete_button.y + 7,
+            dialog_mode_ == DialogMode::Name ? "OK" : "Delete", white);
+        text_clipped(framebuffer, content, areas.cancel_button.x + 12, areas.cancel_button.y + 7, "Cancel", white);
     }
 }
 
@@ -360,13 +370,21 @@ void FileManagerApp::on_mouse(const AppMouseEvent& event)
 {
     if (!event.left_pressed) return;
     if (dialog_mode_ != DialogMode::None) {
-        if (event.y >= kDialogTop && event.y < kDialogBottom) {
-            if (event.x >= 24 && event.x < 104) {
-                if (dialog_mode_ == DialogMode::Name) confirm_name();
-                else confirm_delete();
-            } else if (event.x >= 112 && event.x < 192) {
-                cancel_dialog();
-            }
+        if (g_content_width <= 0 || g_content_height <= 0) return;
+        const auto areas = presentation::layout(
+            graphics::Rect{0, 0, g_content_width, g_content_height},
+            model_.entry_count(), model_.view_mode());
+        if (event.x >= areas.delete_button.x &&
+            event.x < areas.delete_button.x + areas.delete_button.width &&
+            event.y >= areas.delete_button.y &&
+            event.y < areas.delete_button.y + areas.delete_button.height) {
+            if (dialog_mode_ == DialogMode::Name) confirm_name();
+            else confirm_delete();
+        } else if (event.x >= areas.cancel_button.x &&
+                   event.x < areas.cancel_button.x + areas.cancel_button.width &&
+                   event.y >= areas.cancel_button.y &&
+                   event.y < areas.cancel_button.y + areas.cancel_button.height) {
+            cancel_dialog();
         }
         return;
     }
