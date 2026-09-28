@@ -21,7 +21,8 @@ static gui::AppInstance test_app()
     return gui::AppInstance{nullptr, gui::AppCallbacks{
         [](void*, graphics::Framebuffer&, graphics::Rect) {},
         key_stub,
-        close_stub}};
+        close_stub,
+        nullptr}};
 }
 
 static void test_shell_character_adapter()

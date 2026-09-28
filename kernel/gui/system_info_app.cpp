@@ -175,6 +175,7 @@ AppInstance SystemInfoApp::instance()
             draw_callback,
             key_callback,
             close_callback,
+            nullptr,
         },
     };
 }

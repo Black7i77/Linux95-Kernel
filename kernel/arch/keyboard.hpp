@@ -13,6 +13,8 @@ enum class KeyCode : uint8_t {
     ArrowRight,
     ArrowUp,
     ArrowDown,
+    Escape,
+    Delete,
 };
 
 struct KeyEvent {

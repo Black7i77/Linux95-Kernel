@@ -25,6 +25,21 @@ static void test_bad_sync_is_ignored()
     assert(!event.middle);
 }
 
+static void test_command_ack_cannot_displace_first_movement_packet()
+{
+    PacketDecoder decoder;
+    MouseEvent event{};
+
+    // QEMU can deliver a late 0xFA command ACK after mouse initialization.
+    // It has the sync bit but also both overflow bits, so it is not a header.
+    assert(!decoder.feed(0xFA, event));
+    assert(!decoder.feed(0x38, event));
+    assert(!decoder.feed(0xD8, event));
+    assert(decoder.feed(0xD8, event));
+    assert(event.dx == -40);
+    assert(event.dy == -40);
+}
+
 static void test_left_button()
 {
     PacketDecoder decoder;
@@ -128,6 +143,7 @@ static void test_axis_sign_comes_from_status_byte()
 int main()
 {
     test_bad_sync_is_ignored();
+    test_command_ack_cannot_displace_first_movement_packet();
     test_left_button();
     test_all_buttons();
     test_incomplete_packet_emits_nothing();

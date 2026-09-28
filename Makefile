@@ -26,6 +26,7 @@ FAULT_TEST_IMAGE := $(BUILD)/linux95-fault-test.img
 PREEMPTION_TEST_IMAGE := $(BUILD)/linux95-preemption-test.img
 FAT32_WRITE_TEST_IMAGE := $(BUILD)/linux95-fat32-write-test.img
 FAT32_WRITE_TEST_FAT_IMAGE := $(BUILD)/linux95-fat32-write-test-fat.img
+FILE_MANAGER_TEST_FAT_IMAGE := $(BUILD)/linux95-file-manager-test-fat.img
 EDITOR_TEST_IMAGE := $(BUILD)/linux95-editor-test.img
 EDITOR_TEST_FAT_IMAGE := $(BUILD)/linux95-editor-test-fat.img
 
@@ -67,6 +68,7 @@ KERNEL_OBJS := \
         $(BUILD)/terminal_model.o $(BUILD)/terminal_app.o \
         $(BUILD)/editor_model.o $(BUILD)/editor_file.o \
         $(BUILD)/system_info_app.o \
+        $(BUILD)/file_manager_model.o $(BUILD)/file_manager_app.o \
         $(BUILD)/window_manager.o \
         $(BUILD)/desktop.o \
 	$(BUILD)/panic.o \
@@ -121,7 +123,7 @@ DNS_NETWORK_TEST_IMAGE := $(BUILD)/linux95-dns-network-test.img
 FAT32_WRITE_TEST_OBJS := $(subst $(BUILD)/fat32_write.o,$(BUILD)/fat32-write-test-writer.o,$(subst $(BUILD)/kernel.o,$(BUILD)/kernel-fat32-write-test.o,$(KERNEL_OBJS))) $(BUILD)/fat32_write_self_test.o
 EDITOR_TEST_OBJS := $(subst $(BUILD)/terminal_app.o,$(BUILD)/editor-test-terminal-app.o,$(KERNEL_OBJS))
 
-.PHONY: all clean run run-debug test test-qemu prepare-storage-test-image test-host-keyboard test-host-keyboard-queue-concurrency test-host-terminal-key-event test-host-editor-model test-host-shell-edit test-host-editor-file test-host-editor-state test-host-terminal-editor-integration test-host-segments test-host-process test-host-scheduler test-host-user-space test-host-elf test-host-elf-loader-plan test-host-syscall test-host-memory test-host-storage test-host-filesystem test-host-graphics test-host-pci test-host-rtl8139-helpers test-host-kernel-virtual-to-physical test-host-ethernet test-host-arp test-host-ipv4 test-host-icmp test-host-udp test-host-udp-bindings test-host-network-udp test-host-dns-message test-host-dns-response test-host-dns-resolver test-host-heap test-memory-source test-storage-source test-relocations check-tools
+.PHONY: all clean run run-debug test test-qemu prepare-storage-test-image prepare-file-manager-test-image test-host-keyboard test-host-keyboard-queue-concurrency test-host-terminal-key-event test-host-editor-model test-host-shell-edit test-host-editor-file test-host-editor-state test-host-terminal-editor-integration test-host-segments test-host-process test-host-scheduler test-host-user-space test-host-elf test-host-elf-loader-plan test-host-syscall test-host-memory test-host-storage test-host-filesystem test-host-graphics test-host-pci test-host-rtl8139-helpers test-host-kernel-virtual-to-physical test-host-ethernet test-host-arp test-host-ipv4 test-host-icmp test-host-udp test-host-udp-bindings test-host-dns-message test-host-dns-response test-host-dns-resolver test-host-heap test-memory-source test-storage-source test-relocations check-tools test-host-file-manager-app test-host-file-manager-render test-host-file-manager-image-checks
 .PHONY: prepare-editor-test-image
 
 all: check-tools $(BUILD)/linux95-kernel.img $(BUILD)/user/init.elf $(BUILD)/user/worker.elf $(BUILD)/editor_model.o $(BUILD)/editor_file.o
@@ -283,13 +285,19 @@ $(BUILD)/editor-test-terminal-app.o: kernel/gui/terminal_app.cpp kernel/gui/term
 >$(CXX) $(CXXFLAGS) -Os -DLINUX95_QEMU_EDITOR_SELF_TEST -c $< -o $@
 
 $(BUILD)/system_info_app.o: kernel/gui/system_info_app.cpp kernel/gui/system_info_app.hpp kernel/gui/app.hpp kernel/graphics/renderer.hpp kernel/arch/pit.hpp kernel/memory/memory.hpp kernel/memory/physical.hpp kernel/memory/heap.hpp kernel/storage/disk.hpp kernel/filesystem/filesystem.hpp | $(BUILD)
->$(CXX) $(CXXFLAGS) -c $< -o $@
+>$(CXX) $(CXXFLAGS) -Os -c $< -o $@
+
+$(BUILD)/file_manager_model.o: kernel/gui/file_manager_model.cpp kernel/gui/file_manager_model.hpp kernel/filesystem/vfs.hpp kernel/filesystem/filesystem.hpp | $(BUILD)
+>$(CXX) $(CXXFLAGS) -Os -c $< -o $@
+
+$(BUILD)/file_manager_app.o: kernel/gui/file_manager_app.cpp kernel/gui/file_manager_app.hpp kernel/gui/file_manager_model.hpp kernel/gui/app.hpp kernel/graphics/renderer.hpp | $(BUILD)
+>$(CXX) $(CXXFLAGS) -Os -c $< -o $@
 
 $(BUILD)/window_manager.o: kernel/gui/window_manager.cpp kernel/gui/window_manager.hpp kernel/gui/geometry.hpp | $(BUILD)
->$(CXX) $(CXXFLAGS) -c $< -o $@
+>$(CXX) $(CXXFLAGS) -Os -c $< -o $@
 
-$(BUILD)/desktop.o: kernel/gui/desktop.cpp kernel/gui/desktop.hpp kernel/gui/window_manager.hpp kernel/gui/app.hpp kernel/gui/terminal_app.hpp kernel/gui/system_info_app.hpp kernel/graphics/renderer.hpp kernel/arch/debug.hpp kernel/arch/io.hpp kernel/arch/keyboard.hpp kernel/arch/mouse.hpp kernel/arch/pit.hpp kernel/net/network.hpp kernel/net/dns.hpp | $(BUILD)
->$(CXX) $(CXXFLAGS) -c $< -o $@
+$(BUILD)/desktop.o: kernel/gui/desktop.cpp kernel/gui/desktop.hpp kernel/gui/window_manager.hpp kernel/gui/app.hpp kernel/gui/terminal_app.hpp kernel/gui/system_info_app.hpp kernel/gui/file_manager_app.hpp kernel/graphics/renderer.hpp kernel/arch/debug.hpp kernel/arch/io.hpp kernel/arch/keyboard.hpp kernel/arch/mouse.hpp kernel/arch/pit.hpp kernel/net/network.hpp kernel/net/dns.hpp | $(BUILD)
+>$(CXX) $(CXXFLAGS) -Os -c $< -o $@
 
 $(BUILD)/framebuffer.o: kernel/graphics/framebuffer.cpp kernel/graphics/framebuffer.hpp kernel/graphics/framebuffer_helpers.hpp kernel/boot_info.hpp kernel/memory/paging.hpp | $(BUILD)
 >$(CXX) $(CXXFLAGS) -c $< -o $@
@@ -301,7 +309,7 @@ $(BUILD)/vga_output.o: kernel/terminal/vga_output.cpp kernel/terminal/vga_output
 >$(CXX) $(CXXFLAGS) -c $< -o $@
 
 $(BUILD)/shell_session.o: kernel/terminal/shell_session.cpp kernel/terminal/shell_session.hpp kernel/terminal/output.hpp kernel/net/network.hpp kernel/net/dns.hpp | $(BUILD)
->$(CXX) $(CXXFLAGS) -c $< -o $@
+>$(CXX) $(CXXFLAGS) -Os -c $< -o $@
 
 $(BUILD)/panic.o: kernel/panic/panic.cpp kernel/panic/panic.hpp | $(BUILD)
 >$(CXX) $(CXXFLAGS) -c $< -o $@
@@ -559,6 +567,12 @@ $(BUILD)/host-vfs-test: \
 	kernel/filesystem/filesystem.hpp | $(BUILD)
 >$(CXX) $(HOST_CXXFLAGS) tests/host/vfs_test.cpp kernel/filesystem/vfs.cpp -o $@
 
+$(BUILD)/host-vfs-name-test: tests/host/vfs_name_test.cpp kernel/filesystem/filesystem.cpp kernel/filesystem/filesystem.hpp kernel/filesystem/vfs.cpp kernel/filesystem/vfs.hpp kernel/filesystem/fat32.cpp kernel/filesystem/fat32.hpp kernel/filesystem/fat32_helpers.hpp kernel/filesystem/fat32_write.cpp kernel/filesystem/fat32_write.hpp kernel/storage/disk.cpp kernel/storage/disk.hpp kernel/storage/ata.hpp | $(BUILD)
+>$(CXX) $(HOST_CXXFLAGS) tests/host/vfs_name_test.cpp kernel/filesystem/filesystem.cpp kernel/filesystem/vfs.cpp kernel/filesystem/fat32.cpp kernel/filesystem/fat32_write.cpp kernel/storage/disk.cpp -o $@
+
+$(BUILD)/host-file-manager-model-test: tests/host/file_manager_model_test.cpp tests/host/file_manager_fake_vfs.cpp tests/host/file_manager_fake_vfs.hpp kernel/gui/file_manager_model.cpp kernel/gui/file_manager_model.hpp kernel/filesystem/vfs.hpp kernel/filesystem/filesystem.hpp | $(BUILD)
+>$(CXX) $(HOST_CXXFLAGS) tests/host/file_manager_model_test.cpp tests/host/file_manager_fake_vfs.cpp kernel/gui/file_manager_model.cpp -o $@
+
 $(BUILD)/host-filesystem-write-test: tests/host/filesystem_write_test.cpp kernel/filesystem/filesystem.cpp kernel/filesystem/filesystem.hpp kernel/filesystem/vfs.cpp kernel/filesystem/vfs.hpp kernel/filesystem/fat32.hpp kernel/filesystem/fat32_write.hpp kernel/storage/disk.cpp kernel/storage/disk.hpp | $(BUILD)
 >$(CXX) $(HOST_CXXFLAGS) tests/host/filesystem_write_test.cpp kernel/filesystem/filesystem.cpp kernel/filesystem/vfs.cpp kernel/storage/disk.cpp -o $@
 
@@ -571,10 +585,11 @@ $(BUILD)/host-framebuffer-helpers-test: tests/host/framebuffer_helpers_test.cpp 
 test-host-graphics: $(BUILD)/host-framebuffer-helpers-test
 >$(BUILD)/host-framebuffer-helpers-test
 
-test-host-filesystem: $(BUILD)/host-fat32-helpers-test $(BUILD)/host-fat32-mount-test $(BUILD)/host-vfs-test $(BUILD)/host-fat32-write-test $(BUILD)/host-filesystem-write-test $(BUILD)/host-filesystem-command-test
+test-host-filesystem: $(BUILD)/host-fat32-helpers-test $(BUILD)/host-fat32-mount-test $(BUILD)/host-vfs-test $(BUILD)/host-vfs-name-test $(BUILD)/host-fat32-write-test $(BUILD)/host-filesystem-write-test $(BUILD)/host-filesystem-command-test
 >$(BUILD)/host-fat32-helpers-test
 >$(BUILD)/host-fat32-mount-test
 >$(BUILD)/host-vfs-test
+>$(BUILD)/host-vfs-name-test
 >$(BUILD)/host-fat32-write-test
 >$(BUILD)/host-filesystem-write-test
 >$(BUILD)/host-filesystem-command-test
@@ -788,6 +803,9 @@ $(PREEMPTION_TEST_IMAGE): tests/prepare_fat32_image.py $(BUILD)/user/preempt_hog
 
 prepare-storage-test-image: $(STORAGE_TEST_IMAGE)
 
+prepare-file-manager-test-image: all
+>$(PYTHON) tests/prepare_fat32_image.py $(FILE_MANAGER_TEST_FAT_IMAGE) --file-manager-test
+
 $(EDITOR_TEST_FAT_IMAGE): tests/prepare_fat32_image.py $(BUILD)/user/init.elf $(BUILD)/user/worker.elf | $(BUILD)
 >$(PYTHON) tests/prepare_fat32_image.py $@ --editor-test
 
@@ -825,6 +843,9 @@ test: all test-host-memory test-host-storage test-host-heap test-host-segments t
 >$(PYTHON) tests/filesystem_source_checks.py
 >$(PYTHON) tests/filesystem_source_checks_test.py
 >$(PYTHON) tests/relocation_checks.py
+>$(PYTHON) tests/file_manager_image_checks_test.py
+>$(PYTHON) tests/qemu_cursor_test.py
+>$(PYTHON) tests/file_manager_screen_checks_test.py
 
 test-qemu: all $(NETWORK_TEST_IMAGE) $(UDP_NETWORK_TEST_IMAGE) $(DNS_NETWORK_TEST_IMAGE) prepare-storage-test-image
 >@command -v $(QEMU) >/dev/null || { echo "Missing tool: $(QEMU)"; exit 1; }
@@ -833,6 +854,7 @@ test-qemu: all $(NETWORK_TEST_IMAGE) $(UDP_NETWORK_TEST_IMAGE) $(DNS_NETWORK_TES
 >$(PYTHON) tests/qemu_smoke.py --dns-network-test
 >$(PYTHON) tests/qemu_smoke.py --without-network
 >$(PYTHON) tests/qemu_smoke.py --process-preemption-test
+>$(PYTHON) tests/qemu_smoke.py --file-manager-test
 
 run: all prepare-storage-test-image
 >$(QEMU) \
@@ -900,6 +922,16 @@ test-host-window-manager: $(BUILD)/host-window-manager-test
 
 test-host-graphics: test-host-window-manager
 
+.PHONY: test-host-desktop-mouse-routing
+
+$(BUILD)/host-desktop-mouse-routing-test: tests/host/desktop_mouse_routing_test.cpp kernel/gui/desktop.cpp kernel/gui/desktop.hpp kernel/gui/app.hpp kernel/gui/window_manager.cpp kernel/gui/window_manager.hpp kernel/gui/geometry.hpp | $(BUILD)
+>$(CXX) $(HOST_CXXFLAGS) -ffunction-sections -fdata-sections tests/host/desktop_mouse_routing_test.cpp kernel/gui/desktop.cpp kernel/gui/window_manager.cpp -Wl,--gc-sections -o $@
+
+test-host-desktop-mouse-routing: $(BUILD)/host-desktop-mouse-routing-test
+>$(BUILD)/host-desktop-mouse-routing-test
+
+test-host-graphics: test-host-desktop-mouse-routing
+
 .PHONY: test-host-terminal-model
 
 $(BUILD)/host-terminal-model-test: tests/host/terminal_model_test.cpp kernel/gui/terminal_model.hpp kernel/gui/terminal_model.cpp kernel/terminal/output.hpp | $(BUILD)
@@ -931,6 +963,27 @@ test-host-terminal-key-event: $(BUILD)/host-terminal-key-event-test
 >$(BUILD)/host-terminal-key-event-test
 
 test-host-graphics: test-host-terminal-key-event
+
+$(BUILD)/host-file-manager-app-test: tests/host/file_manager_app_test.cpp tests/host/file_manager_fake_vfs.cpp kernel/gui/file_manager_model.cpp kernel/gui/file_manager_app.cpp kernel/gui/desktop.cpp kernel/gui/window_manager.cpp kernel/graphics/renderer.cpp kernel/gui/desktop.hpp kernel/gui/file_manager_model.hpp kernel/gui/file_manager_app.hpp | $(BUILD)
+>$(CXX) $(HOST_CXXFLAGS) -ffunction-sections -fdata-sections tests/host/file_manager_app_test.cpp tests/host/file_manager_fake_vfs.cpp kernel/gui/file_manager_model.cpp kernel/gui/file_manager_app.cpp kernel/gui/desktop.cpp kernel/gui/window_manager.cpp kernel/graphics/renderer.cpp -Wl,--gc-sections -o $@
+
+test-host-file-manager-app: $(BUILD)/host-file-manager-app-test
+>$(BUILD)/host-file-manager-app-test
+
+$(BUILD)/host-file-manager-render-test: tests/host/file_manager_app_test.cpp tests/host/file_manager_fake_vfs.cpp kernel/gui/file_manager_model.cpp kernel/gui/file_manager_app.cpp kernel/gui/desktop.cpp kernel/gui/window_manager.cpp kernel/graphics/renderer.cpp kernel/gui/desktop.hpp kernel/gui/file_manager_model.hpp kernel/gui/file_manager_app.hpp | $(BUILD)
+>$(CXX) $(HOST_CXXFLAGS) -ffunction-sections -fdata-sections tests/host/file_manager_app_test.cpp tests/host/file_manager_fake_vfs.cpp kernel/gui/file_manager_model.cpp kernel/gui/file_manager_app.cpp kernel/gui/desktop.cpp kernel/gui/window_manager.cpp kernel/graphics/renderer.cpp -Wl,--gc-sections -o $@
+
+$(BUILD)/host-file-manager-clip-test: tests/host/file_manager_clip_test.cpp tests/host/file_manager_fake_vfs.cpp kernel/gui/file_manager_model.cpp kernel/gui/file_manager_app.cpp kernel/gui/desktop.cpp kernel/gui/window_manager.cpp kernel/graphics/renderer.cpp kernel/gui/file_manager_app.hpp kernel/gui/desktop.hpp | $(BUILD)
+>$(CXX) $(HOST_CXXFLAGS) -Itests/host -ffunction-sections -fdata-sections tests/host/file_manager_clip_test.cpp tests/host/file_manager_fake_vfs.cpp kernel/gui/file_manager_model.cpp kernel/gui/file_manager_app.cpp kernel/gui/desktop.cpp kernel/gui/window_manager.cpp kernel/graphics/renderer.cpp -Wl,--gc-sections -o $@
+
+test-host-file-manager-render: $(BUILD)/host-file-manager-render-test $(BUILD)/host-file-manager-clip-test
+>$(BUILD)/host-file-manager-render-test
+>$(BUILD)/host-file-manager-clip-test
+
+test-host-file-manager-image-checks:
+>$(PYTHON) tests/file_manager_image_checks_test.py
+
+test-host-graphics: test-host-file-manager-app test-host-file-manager-render
 
 $(BUILD)/host-editor-model-test: tests/host/editor_model_test.cpp kernel/gui/editor_model.hpp kernel/gui/editor_model.cpp | $(BUILD)
 >$(CXX) $(HOST_CXXFLAGS) $< kernel/gui/editor_model.cpp -o $@

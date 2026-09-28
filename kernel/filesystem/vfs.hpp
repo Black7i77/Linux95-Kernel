@@ -24,6 +24,7 @@ struct DirectoryEntry {
 };
 
 void initialize();
+Status validate_name(const char* name);
 int open(const char* path, Status& status);
 Status read(
     int fd,

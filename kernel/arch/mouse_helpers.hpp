@@ -33,6 +33,12 @@ public:
         MouseEvent& event)
     {
         if (index_ == 0) {
+            // A delayed PS/2 command acknowledgement has the sync bit set,
+            // but it is not a movement packet header.
+            if (byte == 0xFAu) {
+                return false;
+            }
+
             // A valid PS/2 mouse packet always has bit 3 set.
             if ((byte & 0x08u) == 0) {
                 return false;

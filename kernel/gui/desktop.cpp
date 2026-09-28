@@ -6,6 +6,7 @@
 #include "arch/mouse.hpp"
 #include "arch/pit.hpp"
 #include "gui/system_info_app.hpp"
+#include "gui/file_manager_app.hpp"
 #include "gui/terminal_app.hpp"
 #include "net/network.hpp"
 #include "net/dns.hpp"
@@ -55,6 +56,7 @@ constexpr int32_t kTaskButtonHeight = 24;
 
 constexpr int32_t kMenuWidth = 180;
 constexpr int32_t kMenuItemHeight = 24;
+constexpr size_t kMenuItemCount = 3;
 
 graphics::Rect to_graphics(
     gui::Rect rect)
@@ -172,7 +174,7 @@ gui::Rect menu_bounds()
         0,
         kPanelHeight,
         kMenuWidth,
-        kMenuItemHeight * 2,
+        kMenuItemHeight * kMenuItemCount,
     };
 }
 
@@ -244,9 +246,11 @@ struct RuntimeState {
 
     gui::TerminalApp terminal_app;
     gui::SystemInfoApp system_info_app;
+    gui::file_manager::FileManagerApp file_manager_app;
 
     gui::AppInstance terminal;
     gui::AppInstance system_info;
+    gui::AppInstance file_manager;
 
     DirtyRegionQueue dirty;
 
@@ -274,10 +278,13 @@ struct RuntimeState {
           windows(),
           terminal_app(),
           system_info_app(),
+          file_manager_app(),
           terminal(
               terminal_app.instance()),
           system_info(
               system_info_app.instance()),
+          file_manager(
+              file_manager_app.instance()),
           dirty(),
           mouse_position{
               kScreenWidth / 2,
@@ -306,6 +313,10 @@ gui::AppInstance* app_for(
         return &state.system_info;
     }
 
+    if (id == kFileManagerWindowId) {
+        return &state.file_manager;
+    }
+
     return nullptr;
 }
 
@@ -320,6 +331,10 @@ const char* title_for(
         id ==
         kSystemInfoWindowId) {
         return "System Info";
+    }
+
+    if (id == kFileManagerWindowId) {
+        return "File Manager";
     }
 
     return "Linux95";
@@ -388,6 +403,7 @@ bool activate_runtime_window(
     RuntimeState& state,
     gui::WindowId id)
 {
+    const bool is_new = state.windows.find(id) == nullptr;
     const gui::WindowId old_focus =
         state.windows.focused();
 
@@ -400,6 +416,10 @@ bool activate_runtime_window(
             state.windows,
             id)) {
         return false;
+    }
+
+    if (is_new && id == kFileManagerWindowId) {
+        state.file_manager_app.open();
     }
 
     invalidate_window(
@@ -647,6 +667,16 @@ void draw_panel(
                 task_slot++);
         }
 
+        if (
+            state.windows.find(
+                kFileManagerWindowId) !=
+            nullptr) {
+            draw_task_button(
+                state,
+                kFileManagerWindowId,
+                task_slot);
+        }
+
         char uptime[21];
 
         format_u64(
@@ -728,6 +758,20 @@ void draw_panel(
         menu.y +
             kMenuItemHeight + 8,
         "System Info",
+        kBlack);
+
+    graphics::draw_line(
+        state.framebuffer,
+        menu.x,
+        menu.y + kMenuItemHeight * 2,
+        menu.x + menu.width - 1,
+        menu.y + kMenuItemHeight * 2,
+        kPanelDark);
+    graphics::draw_text(
+        state.framebuffer,
+        menu.x + 8,
+        menu.y + kMenuItemHeight * 2 + 8,
+        "File Manager",
         kBlack);
 }
 
@@ -920,46 +964,9 @@ void redraw_region(
     }
 
     // 2. Open windows in ascending z order.
-    const gui::Window* ordered[2];
-    size_t ordered_count = 0;
-
-    const gui::Window* terminal =
-        state.windows.find(
-            kTerminalWindowId);
-
-    if (
-        terminal != nullptr &&
-        terminal->state ==
-            gui::WindowState::Open) {
-        ordered[ordered_count++] =
-            terminal;
-    }
-
-    const gui::Window* system_info =
-        state.windows.find(
-            kSystemInfoWindowId);
-
-    if (
-        system_info != nullptr &&
-        system_info->state ==
-            gui::WindowState::Open) {
-        ordered[ordered_count++] =
-            system_info;
-    }
-
-    if (
-        ordered_count == 2 &&
-        ordered[0]->z >
-            ordered[1]->z) {
-        const gui::Window* temp =
-            ordered[0];
-
-        ordered[0] =
-            ordered[1];
-
-        ordered[1] =
-            temp;
-    }
+    const gui::Window* ordered[gui::WindowManager::kMaxWindows];
+    const size_t ordered_count = state.windows.open_windows_in_z_order(
+        ordered, gui::WindowManager::kMaxWindows);
 
     for (
         size_t i = 0;
@@ -1038,6 +1045,20 @@ gui::WindowId task_window_at(
                 point)) {
             return kSystemInfoWindowId;
         }
+
+        ++slot;
+    }
+
+    if (
+        state.windows.find(
+            kFileManagerWindowId) !=
+        nullptr) {
+        if (
+            gui::contains(
+                task_button_bounds(slot),
+                point)) {
+            return kFileManagerWindowId;
+        }
     }
 
     return 0;
@@ -1058,12 +1079,14 @@ bool handle_panel_or_menu_click(
             gui::contains(
                 menu,
                 point)) {
+            const int32_t item =
+                (point.y - menu.y) / kMenuItemHeight;
             const gui::WindowId id =
-                point.y <
-                    menu.y +
-                        kMenuItemHeight
+                item == 0
                     ? kTerminalWindowId
-                    : kSystemInfoWindowId;
+                    : item == 1
+                        ? kSystemInfoWindowId
+                        : kFileManagerWindowId;
 
             state.menu_open = false;
 
@@ -1154,7 +1177,7 @@ bool handle_panel_or_menu_click(
     return true;
 }
 
-void handle_window_mouse_down(
+bool handle_window_mouse_down(
     RuntimeState& state,
     gui::Point point)
 {
@@ -1163,14 +1186,14 @@ void handle_window_mouse_down(
             point);
 
     if (id == 0) {
-        return;
+        return false;
     }
 
     const gui::Window* window =
         state.windows.find(id);
 
     if (window == nullptr) {
-        return;
+        return false;
     }
 
     const ChromeHit hit =
@@ -1210,7 +1233,7 @@ void handle_window_mouse_down(
             invalidate_panel(state);
         }
 
-        return;
+        return true;
     }
 
     if (
@@ -1232,7 +1255,7 @@ void handle_window_mouse_down(
             invalidate_panel(state);
         }
 
-        return;
+        return true;
     }
 
     if (
@@ -1249,7 +1272,7 @@ void handle_window_mouse_down(
             state.pointer_window = id;
         }
 
-        return;
+        return true;
     }
 
     if (
@@ -1266,7 +1289,7 @@ void handle_window_mouse_down(
             state.pointer_window = id;
         }
 
-        return;
+        return true;
     }
 
     if (
@@ -1276,12 +1299,16 @@ void handle_window_mouse_down(
             state,
             id);
     }
+    return hit != ChromeHit::Content;
 }
 
 void process_mouse_event(
     RuntimeState& state,
     const mouse::MouseEvent& event)
 {
+    const bool pointer_action_active =
+        state.pointer_window != 0;
+
     restore_cursor(state);
 
     gui::Point next{
@@ -1345,12 +1372,14 @@ void process_mouse_event(
         !event.left &&
         state.left_down;
 
+    bool chrome_event_consumed = false;
     if (pressed) {
-        if (
-            !handle_panel_or_menu_click(
+        chrome_event_consumed =
+            handle_panel_or_menu_click(
                 state,
-                state.mouse_position)) {
-            handle_window_mouse_down(
+                state.mouse_position);
+        if (!chrome_event_consumed) {
+            chrome_event_consumed = handle_window_mouse_down(
                 state,
                 state.mouse_position);
         }
@@ -1363,6 +1392,34 @@ void process_mouse_event(
 
     state.left_down =
         event.left;
+
+    if (!pointer_action_active) {
+        const gui::WindowId focused =
+            state.windows.focused();
+        const gui::Window* window =
+            state.windows.find(focused);
+        gui::AppInstance* app =
+            app_for(state, focused);
+
+        if (
+            window != nullptr &&
+            app != nullptr &&
+            window->state == gui::WindowState::Open) {
+            route_mouse_after_chrome(
+                state.windows,
+                focused,
+                *app,
+                content_rect(window->bounds),
+                state.mouse_position,
+                pressed,
+                released,
+                event.left,
+                pointer_action_active,
+                state.pointer_window,
+                chrome_event_consumed,
+                &state.dirty);
+        }
+    }
 
 }
 
@@ -1380,9 +1437,10 @@ void process_keyboard(
                 state.windows,
                 state.terminal,
                 state.system_info,
+                state.file_manager,
                 event) &&
-            focused ==
-                kTerminalWindowId) {
+            (focused == kTerminalWindowId ||
+             focused == kFileManagerWindowId)) {
             invalidate_window(
                 state,
                 focused);
@@ -1479,6 +1537,16 @@ gui::Rect system_info_default_bounds()
     };
 }
 
+gui::Rect file_manager_default_bounds()
+{
+    return gui::Rect{
+        250,
+        110,
+        760,
+        480,
+    };
+}
+
 bool initialize_default_windows(
     gui::WindowManager& windows)
 {
@@ -1537,6 +1605,8 @@ bool activate_window(
         kSystemInfoWindowId) {
         bounds =
             system_info_default_bounds();
+    } else if (id == kFileManagerWindowId) {
+        bounds = file_manager_default_bounds();
     } else {
         return false;
     }
@@ -1557,6 +1627,22 @@ bool route_key(
     const gui::WindowManager& windows,
     gui::AppInstance& terminal,
     gui::AppInstance& system_info,
+    const keyboard::KeyEvent& event)
+{
+    gui::AppInstance file_manager{nullptr, gui::AppCallbacks{}};
+    return route_key(
+        windows,
+        terminal,
+        system_info,
+        file_manager,
+        event);
+}
+
+bool route_key(
+    const gui::WindowManager& windows,
+    gui::AppInstance& terminal,
+    gui::AppInstance& system_info,
+    gui::AppInstance& file_manager,
     const keyboard::KeyEvent& event)
 {
     const gui::WindowId focused =
@@ -1580,6 +1666,8 @@ bool route_key(
         focused ==
         kSystemInfoWindowId) {
         app = &system_info;
+    } else if (focused == kFileManagerWindowId) {
+        app = &file_manager;
     } else {
         return false;
     }
@@ -1595,6 +1683,85 @@ bool route_key(
         event);
 
     return true;
+}
+
+bool route_mouse(
+    const gui::WindowManager& windows,
+    gui::WindowId target,
+    gui::AppInstance& app,
+    gui::Rect content,
+    gui::Point screen_point,
+    bool left_pressed,
+    bool left_released,
+    bool left_down)
+{
+    const gui::Window* window =
+        windows.find(target);
+
+    if (
+        windows.focused() != target ||
+        window == nullptr ||
+        window->state != gui::WindowState::Open ||
+        !gui::contains(content, screen_point) ||
+        app.callbacks.on_mouse == nullptr) {
+        return false;
+    }
+
+    app.callbacks.on_mouse(
+        app.context,
+        gui::AppMouseEvent{
+            screen_point.x - content.x,
+            screen_point.y - content.y,
+            left_pressed,
+            left_released,
+            left_down,
+        });
+
+    return true;
+}
+
+bool route_mouse_after_chrome(
+    const gui::WindowManager& windows,
+    gui::WindowId target,
+    gui::AppInstance& app,
+    gui::Rect content,
+    gui::Point screen_point,
+    bool left_pressed,
+    bool left_released,
+    bool left_down,
+    bool pointer_action_was_active,
+    gui::WindowId pointer_window_after_chrome,
+    bool chrome_event_consumed,
+    DirtyRegionQueue* dirty_regions)
+{
+    if (
+        chrome_event_consumed ||
+        pointer_action_was_active ||
+        pointer_window_after_chrome != 0) {
+        return false;
+    }
+
+    const bool delivered = route_mouse(
+        windows,
+        target,
+        app,
+        content,
+        screen_point,
+        left_pressed,
+        left_released,
+        left_down);
+    if (delivered && dirty_regions != nullptr) {
+        const gui::Window* window = windows.find(target);
+        if (window != nullptr) {
+            dirty_regions->invalidate(graphics::Rect{
+                window->bounds.x,
+                window->bounds.y,
+                window->bounds.width,
+                window->bounds.height,
+            });
+        }
+    }
+    return delivered;
 }
 
 gui::Rect content_rect(

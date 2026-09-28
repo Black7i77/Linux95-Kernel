@@ -41,12 +41,15 @@ public:
         char character = 0;
         if (extended) {
             switch (code) {
+            case 0x53: key = KeyCode::Delete; break;
             case 0x4B: key = KeyCode::ArrowLeft; break;
             case 0x4D: key = KeyCode::ArrowRight; break;
             case 0x48: key = KeyCode::ArrowUp; break;
             case 0x50: key = KeyCode::ArrowDown; break;
             default: break;
             }
+        } else if (code == 0x01) {
+            key = KeyCode::Escape;
         } else if (code == 0x1C) {
             key = KeyCode::Enter;
         } else if (code == 0x0E) {

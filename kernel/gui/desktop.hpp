@@ -22,6 +22,7 @@ constexpr size_t kMaxDirtyRects = 32;
 
 constexpr gui::WindowId kTerminalWindowId = 1;
 constexpr gui::WindowId kSystemInfoWindowId = 2;
+constexpr gui::WindowId kFileManagerWindowId = 3;
 
 enum class PanelHit : uint8_t {
     None,
@@ -57,6 +58,8 @@ gui::Rect terminal_default_bounds();
 
 gui::Rect system_info_default_bounds();
 
+gui::Rect file_manager_default_bounds();
+
 bool initialize_default_windows(
     gui::WindowManager& windows);
 
@@ -69,6 +72,37 @@ bool route_key(
     gui::AppInstance& terminal,
     gui::AppInstance& system_info,
     const keyboard::KeyEvent& event);
+
+bool route_key(
+    const gui::WindowManager& windows,
+    gui::AppInstance& terminal,
+    gui::AppInstance& system_info,
+    gui::AppInstance& file_manager,
+    const keyboard::KeyEvent& event);
+
+bool route_mouse(
+    const gui::WindowManager& windows,
+    gui::WindowId target,
+    gui::AppInstance& app,
+    gui::Rect content,
+    gui::Point screen_point,
+    bool left_pressed,
+    bool left_released,
+    bool left_down);
+
+bool route_mouse_after_chrome(
+    const gui::WindowManager& windows,
+    gui::WindowId target,
+    gui::AppInstance& app,
+    gui::Rect content,
+    gui::Point screen_point,
+    bool left_pressed,
+    bool left_released,
+    bool left_down,
+    bool pointer_action_was_active,
+    gui::WindowId pointer_window_after_chrome,
+    bool chrome_event_consumed = false,
+    class DirtyRegionQueue* dirty_regions = nullptr);
 
 gui::Rect content_rect(
     gui::Rect bounds);

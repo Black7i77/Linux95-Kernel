@@ -66,6 +66,10 @@ public:
 
     const Window* find(WindowId id) const;
 
+    size_t open_windows_in_z_order(
+        const Window** output,
+        size_t capacity) const;
+
 private:
     enum class PointerAction : uint8_t {
         None,

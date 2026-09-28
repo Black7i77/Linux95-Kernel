@@ -47,6 +47,7 @@ bool docs_path(const char* path)
 namespace linux95::filesystem {
 
 // The VFS read test links without the filesystem facade.
+Status validate_name(const char*) { return Status::InvalidName; }
 Status touch(const char*) { return Status::Unsupported; }
 Status write_file(const char*, const uint8_t*, size_t) { return Status::Unsupported; }
 Status mkdir(const char*) { return Status::Unsupported; }
