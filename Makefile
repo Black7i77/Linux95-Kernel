@@ -122,7 +122,7 @@ DNS_NETWORK_TEST_IMAGE := $(BUILD)/linux95-dns-network-test.img
 FAT32_WRITE_TEST_OBJS := $(subst $(BUILD)/fat32_write.o,$(BUILD)/fat32-write-test-writer.o,$(subst $(BUILD)/kernel.o,$(BUILD)/kernel-fat32-write-test.o,$(KERNEL_OBJS))) $(BUILD)/fat32_write_self_test.o
 EDITOR_TEST_OBJS := $(subst $(BUILD)/terminal_app.o,$(BUILD)/editor-test-terminal-app.o,$(KERNEL_OBJS))
 
-.PHONY: all clean run run-debug test test-qemu prepare-storage-test-image test-host-keyboard test-host-keyboard-queue-concurrency test-host-terminal-key-event test-host-editor-model test-host-shell-edit test-host-editor-file test-host-editor-state test-host-terminal-editor-integration test-host-segments test-host-process test-host-scheduler test-host-user-space test-host-elf test-host-elf-loader-plan test-host-syscall test-host-memory test-host-storage test-host-filesystem test-host-graphics test-host-pci test-host-rtl8139-helpers test-host-kernel-virtual-to-physical test-host-ethernet test-host-arp test-host-ipv4 test-host-icmp test-host-udp test-host-udp-bindings test-host-network-udp test-host-dns-message test-host-dns-response test-host-dns-resolver test-host-heap test-memory-source test-storage-source test-relocations check-tools test-host-file-manager-app
+.PHONY: all clean run run-debug test test-qemu prepare-storage-test-image test-host-keyboard test-host-keyboard-queue-concurrency test-host-terminal-key-event test-host-editor-model test-host-shell-edit test-host-editor-file test-host-editor-state test-host-terminal-editor-integration test-host-segments test-host-process test-host-scheduler test-host-user-space test-host-elf test-host-elf-loader-plan test-host-syscall test-host-memory test-host-storage test-host-filesystem test-host-graphics test-host-pci test-host-rtl8139-helpers test-host-kernel-virtual-to-physical test-host-ethernet test-host-arp test-host-ipv4 test-host-icmp test-host-udp test-host-udp-bindings test-host-dns-message test-host-dns-response test-host-dns-resolver test-host-heap test-memory-source test-storage-source test-relocations check-tools test-host-file-manager-app test-host-file-manager-render
 .PHONY: prepare-editor-test-image
 
 all: check-tools $(BUILD)/linux95-kernel.img $(BUILD)/user/init.elf $(BUILD)/user/worker.elf $(BUILD)/editor_model.o $(BUILD)/editor_file.o
@@ -284,7 +284,7 @@ $(BUILD)/editor-test-terminal-app.o: kernel/gui/terminal_app.cpp kernel/gui/term
 >$(CXX) $(CXXFLAGS) -Os -DLINUX95_QEMU_EDITOR_SELF_TEST -c $< -o $@
 
 $(BUILD)/system_info_app.o: kernel/gui/system_info_app.cpp kernel/gui/system_info_app.hpp kernel/gui/app.hpp kernel/graphics/renderer.hpp kernel/arch/pit.hpp kernel/memory/memory.hpp kernel/memory/physical.hpp kernel/memory/heap.hpp kernel/storage/disk.hpp kernel/filesystem/filesystem.hpp | $(BUILD)
->$(CXX) $(CXXFLAGS) -c $< -o $@
+>$(CXX) $(CXXFLAGS) -Os -c $< -o $@
 
 $(BUILD)/file_manager_model.o: kernel/gui/file_manager_model.cpp kernel/gui/file_manager_model.hpp kernel/filesystem/vfs.hpp kernel/filesystem/filesystem.hpp | $(BUILD)
 >$(CXX) $(CXXFLAGS) -Os -c $< -o $@
@@ -293,10 +293,10 @@ $(BUILD)/file_manager_app.o: kernel/gui/file_manager_app.cpp kernel/gui/file_man
 >$(CXX) $(CXXFLAGS) -Os -c $< -o $@
 
 $(BUILD)/window_manager.o: kernel/gui/window_manager.cpp kernel/gui/window_manager.hpp kernel/gui/geometry.hpp | $(BUILD)
->$(CXX) $(CXXFLAGS) -c $< -o $@
+>$(CXX) $(CXXFLAGS) -Os -c $< -o $@
 
 $(BUILD)/desktop.o: kernel/gui/desktop.cpp kernel/gui/desktop.hpp kernel/gui/window_manager.hpp kernel/gui/app.hpp kernel/gui/terminal_app.hpp kernel/gui/system_info_app.hpp kernel/gui/file_manager_app.hpp kernel/graphics/renderer.hpp kernel/arch/debug.hpp kernel/arch/io.hpp kernel/arch/keyboard.hpp kernel/arch/mouse.hpp kernel/arch/pit.hpp kernel/net/network.hpp kernel/net/dns.hpp | $(BUILD)
->$(CXX) $(CXXFLAGS) -c $< -o $@
+>$(CXX) $(CXXFLAGS) -Os -c $< -o $@
 
 $(BUILD)/framebuffer.o: kernel/graphics/framebuffer.cpp kernel/graphics/framebuffer.hpp kernel/graphics/framebuffer_helpers.hpp kernel/boot_info.hpp kernel/memory/paging.hpp | $(BUILD)
 >$(CXX) $(CXXFLAGS) -c $< -o $@
@@ -308,7 +308,7 @@ $(BUILD)/vga_output.o: kernel/terminal/vga_output.cpp kernel/terminal/vga_output
 >$(CXX) $(CXXFLAGS) -c $< -o $@
 
 $(BUILD)/shell_session.o: kernel/terminal/shell_session.cpp kernel/terminal/shell_session.hpp kernel/terminal/output.hpp kernel/net/network.hpp kernel/net/dns.hpp | $(BUILD)
->$(CXX) $(CXXFLAGS) -c $< -o $@
+>$(CXX) $(CXXFLAGS) -Os -c $< -o $@
 
 $(BUILD)/panic.o: kernel/panic/panic.cpp kernel/panic/panic.hpp | $(BUILD)
 >$(CXX) $(CXXFLAGS) -c $< -o $@
@@ -956,13 +956,19 @@ test-host-terminal-key-event: $(BUILD)/host-terminal-key-event-test
 
 test-host-graphics: test-host-terminal-key-event
 
-$(BUILD)/host-file-manager-app-test: tests/host/file_manager_app_test.cpp tests/host/file_manager_fake_vfs.cpp kernel/gui/file_manager_model.cpp kernel/gui/file_manager_app.cpp kernel/gui/desktop.cpp kernel/gui/window_manager.cpp kernel/gui/desktop.hpp kernel/gui/file_manager_model.hpp kernel/gui/file_manager_app.hpp | $(BUILD)
->$(CXX) $(HOST_CXXFLAGS) -ffunction-sections -fdata-sections tests/host/file_manager_app_test.cpp tests/host/file_manager_fake_vfs.cpp kernel/gui/file_manager_model.cpp kernel/gui/file_manager_app.cpp kernel/gui/desktop.cpp kernel/gui/window_manager.cpp -Wl,--gc-sections -o $@
+$(BUILD)/host-file-manager-app-test: tests/host/file_manager_app_test.cpp tests/host/file_manager_fake_vfs.cpp kernel/gui/file_manager_model.cpp kernel/gui/file_manager_app.cpp kernel/gui/desktop.cpp kernel/gui/window_manager.cpp kernel/graphics/renderer.cpp kernel/gui/desktop.hpp kernel/gui/file_manager_model.hpp kernel/gui/file_manager_app.hpp | $(BUILD)
+>$(CXX) $(HOST_CXXFLAGS) -ffunction-sections -fdata-sections tests/host/file_manager_app_test.cpp tests/host/file_manager_fake_vfs.cpp kernel/gui/file_manager_model.cpp kernel/gui/file_manager_app.cpp kernel/gui/desktop.cpp kernel/gui/window_manager.cpp kernel/graphics/renderer.cpp -Wl,--gc-sections -o $@
 
 test-host-file-manager-app: $(BUILD)/host-file-manager-app-test
 >$(BUILD)/host-file-manager-app-test
 
-test-host-graphics: test-host-file-manager-app
+$(BUILD)/host-file-manager-render-test: tests/host/file_manager_app_test.cpp tests/host/file_manager_fake_vfs.cpp kernel/gui/file_manager_model.cpp kernel/gui/file_manager_app.cpp kernel/gui/desktop.cpp kernel/gui/window_manager.cpp kernel/graphics/renderer.cpp kernel/gui/desktop.hpp kernel/gui/file_manager_model.hpp kernel/gui/file_manager_app.hpp | $(BUILD)
+>$(CXX) $(HOST_CXXFLAGS) -ffunction-sections -fdata-sections tests/host/file_manager_app_test.cpp tests/host/file_manager_fake_vfs.cpp kernel/gui/file_manager_model.cpp kernel/gui/file_manager_app.cpp kernel/gui/desktop.cpp kernel/gui/window_manager.cpp kernel/graphics/renderer.cpp -Wl,--gc-sections -o $@
+
+test-host-file-manager-render: $(BUILD)/host-file-manager-render-test
+>$(BUILD)/host-file-manager-render-test
+
+test-host-graphics: test-host-file-manager-app test-host-file-manager-render
 
 $(BUILD)/host-editor-model-test: tests/host/editor_model_test.cpp kernel/gui/editor_model.hpp kernel/gui/editor_model.cpp | $(BUILD)
 >$(CXX) $(HOST_CXXFLAGS) $< kernel/gui/editor_model.cpp -o $@

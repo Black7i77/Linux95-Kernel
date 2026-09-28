@@ -3,9 +3,26 @@
 #include "gui/file_manager_app.hpp"
 
 #include <assert.h>
+#include <initializer_list>
 #include <string.h>
 
 using namespace linux95;
+
+namespace linux95::gui::file_manager::presentation {
+
+struct Layout {
+    graphics::Rect toolbar;
+    graphics::Rect parent;
+    graphics::Rect path;
+    graphics::Rect entries;
+    graphics::Rect status;
+    graphics::Rect dialog;
+};
+
+Layout layout(graphics::Rect content, size_t entry_count, ViewMode view);
+int hit_test(graphics::Rect content, size_t entry_count, ViewMode view, int32_t x, int32_t y);
+
+} // namespace linux95::gui::file_manager::presentation
 
 namespace {
 
@@ -226,6 +243,65 @@ void test_registration_respects_fixed_window_capacity()
     assert(windows.find(desktop::kFileManagerWindowId) == nullptr);
 }
 
+void test_views_share_entries_and_selection_and_toggle_preserves_navigation()
+{
+    file_manager_fake_vfs::reset();
+    file_manager_fake_vfs::add("/", "DIR", true, 0);
+    file_manager_fake_vfs::add("/", "FILE.TXT", false, 12);
+    file_manager_fake_vfs::add("/DIR", "CHILD.TXT", false, 7);
+    gui::file_manager::FileManagerApp app;
+    assert(app.open() == filesystem::Status::Ok);
+    const graphics::Rect content{0, 0, 360, 180};
+    auto icons = gui::file_manager::presentation::layout(
+        content, app.model().entry_count(), app.model().view_mode());
+    const int icon_index = gui::file_manager::presentation::hit_test(
+        content, app.model().entry_count(), app.model().view_mode(),
+        icons.entries.x + 4, icons.entries.y + 4);
+    assert(icon_index == 0);
+    gui::AppInstance instance = app.instance();
+    graphics::Framebuffer framebuffer{nullptr, 360, 180, 0, {8, 16, 8, 8, 8, 0}};
+    instance.callbacks.draw(instance.context, framebuffer, content);
+    click(instance, icons.entries.x + 4, icons.entries.y + 4);
+    assert(app.model().selected_index() == icon_index);
+    assert(strcmp(app.model().entry(0)->name, "DIR") == 0);
+    click(instance, 285, 12); // View control
+    assert(app.model().view_mode() == gui::file_manager::ViewMode::Details);
+    assert(strcmp(app.model().current_path(), "/") == 0);
+    assert(app.model().selected_index() == 0);
+    auto details = gui::file_manager::presentation::layout(
+        content, app.model().entry_count(), app.model().view_mode());
+    const int row_index = gui::file_manager::presentation::hit_test(
+        content, app.model().entry_count(), app.model().view_mode(),
+        details.entries.x + 4, details.entries.y + 4);
+    assert(row_index == icon_index);
+    instance.callbacks.draw(instance.context, framebuffer, content);
+    click(instance, details.entries.x + 4, details.entries.y + 4);
+    assert(app.model().selected_index() == row_index);
+    send_key(instance, keyboard::KeyCode::Enter);
+    assert(strcmp(app.model().current_path(), "/DIR") == 0);
+    click(instance, 12, 36); // Separate parent control
+    assert(strcmp(app.model().current_path(), "/") == 0);
+}
+
+void test_entry_hit_testing_clips_and_rejects_small_or_outside_bounds()
+{
+    const graphics::Rect content{0, 0, 320, 140};
+    for (const auto view : {gui::file_manager::ViewMode::Icons, gui::file_manager::ViewMode::Details}) {
+        const auto geometry = gui::file_manager::presentation::layout(content, 3, view);
+        assert(gui::file_manager::presentation::hit_test(
+            content, 3, view, geometry.entries.x + 4, geometry.entries.y + 4) == 0);
+        assert(gui::file_manager::presentation::hit_test(
+            content, 3, view, geometry.entries.x + 4,
+            geometry.entries.y + geometry.entries.height + 1) == -1);
+        assert(gui::file_manager::presentation::hit_test(content, 3, view, -1, -1) == -1);
+        const graphics::Rect small_bounds{0, 0, 8, 8};
+        const auto small = gui::file_manager::presentation::layout(small_bounds, 3, view);
+        assert(gui::file_manager::presentation::hit_test(
+            small_bounds, 3, view, small.entries.x, small.entries.y) == -1);
+        assert(gui::file_manager::presentation::hit_test(content, 0, view, 10, 70) == -1);
+    }
+}
+
 } // namespace
 
 int main()
@@ -240,4 +316,6 @@ int main()
     test_file_manager_window_is_created_once_and_restored();
     test_key_routes_to_third_app_when_its_window_is_focused();
     test_registration_respects_fixed_window_capacity();
+    test_views_share_entries_and_selection_and_toggle_preserves_navigation();
+    test_entry_hit_testing_clips_and_rejects_small_or_outside_bounds();
 }

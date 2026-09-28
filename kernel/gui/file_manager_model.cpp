@@ -5,6 +5,12 @@
 namespace linux95::gui::file_manager {
 namespace {
 
+size_t string_length(const char* value) {
+    size_t length = 0;
+    while (value[length] != '\0') ++length;
+    return length;
+}
+
 char fold_ascii(char value) {
     return value >= 'a' && value <= 'z' ? static_cast<char>(value - 'a' + 'A') : value;
 }
@@ -24,20 +30,20 @@ bool copy_bounded(char* destination, const char* source, size_t capacity) {
         if (length + 1 >= capacity) return false;
         ++length;
     }
-    memcpy(destination, source, length + 1);
+    for (size_t i = 0; i <= length; ++i) destination[i] = source[i];
     return true;
 }
 
 bool build_child_path(const char* parent, const char* name, char* destination, size_t capacity) {
-    const size_t parent_length = strlen(parent);
-    const size_t name_length = strlen(name);
+    const size_t parent_length = string_length(parent);
+    const size_t name_length = string_length(name);
     const bool root = parent_length == 1 && parent[0] == '/';
     const size_t separator_length = root ? 0 : 1;
     if (parent[0] != '/' || parent_length + separator_length + name_length + 1 > capacity) return false;
-    memcpy(destination, parent, parent_length);
+    for (size_t i = 0; i < parent_length; ++i) destination[i] = parent[i];
     size_t offset = parent_length;
     if (!root) destination[offset++] = '/';
-    memcpy(destination + offset, name, name_length + 1);
+    for (size_t i = 0; i <= name_length; ++i) destination[offset + i] = name[i];
     return true;
 }
 
@@ -113,9 +119,9 @@ filesystem::Status FileManagerModel::load_path(const char* candidate_path) {
         }
     }
 
-    memcpy(entries_, replacement, replacement_count * sizeof(replacement[0]));
+    for (size_t i = 0; i < replacement_count; ++i) entries_[i] = replacement[i];
     entry_count_ = replacement_count;
-    memcpy(path_, new_path, sizeof(path_));
+    for (size_t i = 0; i < sizeof(path_); ++i) path_[i] = new_path[i];
     truncated_ = replacement_truncated;
     has_selection_ = preserved_selection >= 0;
     if (has_selection_) copy_bounded(selected_name_, entries_[preserved_selection].name, sizeof(selected_name_));
@@ -131,15 +137,15 @@ filesystem::Status FileManagerModel::navigate_into(size_t entry_index) {
     if (name_status != filesystem::Status::Ok) return name_status;
 
     char candidate[filesystem::vfs::kPathCapacity];
-    const size_t path_length = strlen(path_);
-    const size_t name_length = strlen(selected.name);
+    const size_t path_length = string_length(path_);
+    const size_t name_length = string_length(selected.name);
     const bool root = path_length == 1 && path_[0] == '/';
     const size_t separator_length = root ? 0 : 1;
     if (path_length + separator_length + name_length + 1 > sizeof(candidate)) return filesystem::Status::InvalidName;
-    memcpy(candidate, path_, path_length);
+    for (size_t i = 0; i < path_length; ++i) candidate[i] = path_[i];
     size_t offset = path_length;
     if (!root) candidate[offset++] = '/';
-    memcpy(candidate + offset, selected.name, name_length + 1);
+    for (size_t i = 0; i <= name_length; ++i) candidate[offset + i] = selected.name[i];
     return load_path(candidate);
 }
 
@@ -147,7 +153,7 @@ filesystem::Status FileManagerModel::navigate_parent() {
     if (path_[0] == '/' && path_[1] == '\0') return filesystem::Status::Ok;
     char parent[filesystem::vfs::kPathCapacity];
     copy_bounded(parent, path_, sizeof(parent));
-    size_t length = strlen(parent);
+    size_t length = string_length(parent);
     while (length > 1 && parent[length - 1] != '/') --length;
     if (length > 1) parent[length - 1] = '\0';
     else parent[1] = '\0';
