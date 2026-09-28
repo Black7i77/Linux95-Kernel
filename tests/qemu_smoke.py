@@ -12,6 +12,7 @@ import threading
 import time
 
 from qemu_smoke_policy import grace_complete
+from qemu_cursor import locate_cursor, movement_steps, wait_for_cursor
 
 WITHOUT_NETWORK = "--without-network" in sys.argv[1:]
 PROCESS_SELF_TEST = "--process-self-test" in sys.argv[1:]
@@ -22,6 +23,7 @@ UDP_NETWORK_TEST = "--udp-network-test" in sys.argv[1:]
 DNS_NETWORK_TEST = "--dns-network-test" in sys.argv[1:]
 FAT32_WRITE_TEST = "--fat32-write-test" in sys.argv[1:]
 EDITOR_TEST = "--editor-test" in sys.argv[1:]
+FILE_MANAGER_TEST = "--file-manager-test" in sys.argv[1:]
 FAT32_WRITE_BYTES = b"Linux95 FAT32 write proof\x00\xff\n"
 UDP_PAYLOAD = b"linux95-udp-echo"
 UDP_INVALID_REPLY = b"linux95-udp-evil"
@@ -29,21 +31,23 @@ UDP_INVALID_REPLY = b"linux95-udp-evil"
 if sum((WITHOUT_NETWORK, PROCESS_SELF_TEST, PROCESS_FAULT_TEST,
         PROCESS_PREEMPTION_TEST, WITHOUT_USER_PROGRAMS,
         UDP_NETWORK_TEST, DNS_NETWORK_TEST, FAT32_WRITE_TEST,
-        EDITOR_TEST)) > 1 or any(
+        EDITOR_TEST, FILE_MANAGER_TEST)) > 1 or any(
         argument not in ("--without-network", "--process-self-test",
                          "--process-fault-test", "--process-preemption-test",
                          "--without-user-programs", "--udp-network-test",
                          "--dns-network-test", "--fat32-write-test",
-                         "--editor-test")
+                         "--editor-test", "--file-manager-test")
        for argument in sys.argv[1:]):
     print("usage: qemu_smoke.py [--without-network] [--process-self-test] "
           "[--process-fault-test] [--process-preemption-test] "
           "[--without-user-programs] [--udp-network-test] "
-          "[--dns-network-test] [--fat32-write-test] [--editor-test]")
+          "[--dns-network-test] [--fat32-write-test] [--editor-test] "
+          "[--file-manager-test]")
     sys.exit(2)
 
 ROOT = Path(__file__).resolve().parents[1]
 IMAGE = ROOT / "build" / (
+    "linux95-kernel.img" if FILE_MANAGER_TEST else
     "linux95-editor-test.img" if EDITOR_TEST else
     "linux95-fat32-write-test.img" if FAT32_WRITE_TEST else
     "linux95-kernel.img"
@@ -55,6 +59,7 @@ IMAGE = ROOT / "build" / (
     else "linux95-kernel-network-test.img"
 )
 STORAGE_IMAGE = ROOT / "build" / (
+    "linux95-file-manager-test-fat.img" if FILE_MANAGER_TEST else
     "linux95-editor-test-fat.img" if EDITOR_TEST else
     "linux95-fat32-write-test-fat.img" if FAT32_WRITE_TEST else
     "linux95-preemption-test.img" if PROCESS_PREEMPTION_TEST else
@@ -85,6 +90,30 @@ if EDITOR_TEST:
                 cwd=ROOT, stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL, check=False).returncode == 0:
             raise RuntimeError(f"editor fixture unexpectedly contains {name}")
+
+file_manager_boot_digest = None
+file_manager_canonical_digest = None
+if FILE_MANAGER_TEST:
+    if STORAGE_IMAGE.resolve() == CANONICAL_STORAGE_IMAGE.resolve():
+        raise RuntimeError("File Manager test must use a disposable Test image")
+    if CANONICAL_STORAGE_IMAGE.exists():
+        file_manager_canonical_digest = image_digest(CANONICAL_STORAGE_IMAGE)
+    subprocess.run(
+        ["make", "all", "prepare-file-manager-test-image"],
+        cwd=ROOT,
+        check=True,
+    )
+    if not STORAGE_IMAGE.is_file():
+        raise RuntimeError("File Manager disposable Test image was not created")
+    if subprocess.run(
+            ["mdir", "-i", str(STORAGE_IMAGE), "::FMTEST"],
+            cwd=ROOT, stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL, check=False).returncode == 0:
+        raise RuntimeError("File Manager fixture unexpectedly contains FMTEST")
+    if (file_manager_canonical_digest is not None and
+            image_digest(CANONICAL_STORAGE_IMAGE) != file_manager_canonical_digest):
+        raise RuntimeError("canonical Test image changed during fixture preparation")
+    file_manager_boot_digest = image_digest(IMAGE)
 
 
 canonical_digest = None
@@ -180,7 +209,7 @@ if not STORAGE_IMAGE.is_file():
 
 editor_qmp_directory = None
 editor_qmp_socket = None
-if EDITOR_TEST:
+if EDITOR_TEST or FILE_MANAGER_TEST:
     editor_qmp_directory = tempfile.TemporaryDirectory(
         prefix="editor-qmp-", dir=ROOT / "build")
     editor_qmp_socket = str(Path(editor_qmp_directory.name) / "qmp.sock")
@@ -240,7 +269,7 @@ if (not WITHOUT_NETWORK and not PROCESS_SELF_TEST and
         "-device", "rtl8139,netdev=net0",
     ])
 
-if EDITOR_TEST:
+if EDITOR_TEST or FILE_MANAGER_TEST:
     cmd.extend(["-qmp", f"unix:{editor_qmp_socket},server=on,wait=off"])
 
 proc = subprocess.Popen(
@@ -250,7 +279,8 @@ proc = subprocess.Popen(
     text=True,
 )
 
-deadline = time.monotonic() + (30.0 if EDITOR_TEST else
+deadline = time.monotonic() + (60.0 if FILE_MANAGER_TEST else
+                               30.0 if EDITOR_TEST else
                                25.0 if DNS_NETWORK_TEST else 12.0)
 saw_completion = False
 completion_seen_at = None
@@ -259,6 +289,8 @@ editor_failure = None
 completion_marker = (
     "[PASS] shell accepted input"
     if EDITOR_TEST
+    else "[PASS] desktop_online"
+    if FILE_MANAGER_TEST
     else "[PASS] fat32_write_complete"
     if FAT32_WRITE_TEST
     else
@@ -276,7 +308,7 @@ completion_marker = (
 )
 
 try:
-    if EDITOR_TEST:
+    if EDITOR_TEST or FILE_MANAGER_TEST:
         qmp = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         qmp.settimeout(3)
         qmp_deadline = time.monotonic() + 8.0
@@ -331,8 +363,148 @@ try:
                     time.sleep(0.05)
                 return False
 
+            def capture_screen():
+                screenshot = ROOT / "build" / "file-manager-current.ppm" if FILE_MANAGER_TEST else Path(editor_qmp_directory.name) / "pointer.ppm"
+                result = qmp_command({
+                    "execute": "human-monitor-command",
+                    "arguments": {"command-line": f"screendump {screenshot}"},
+                })["return"]
+                if isinstance(result, str) and "error" in result.lower():
+                    raise RuntimeError(f"QEMU screendump failed: {result}")
+                return screenshot.read_bytes()
+
+            def save_stage(name, delay=0.35):
+                time.sleep(delay)
+                (ROOT / "build" / f"file-manager-stage-{name}.ppm").write_bytes(capture_screen())
+
             if not wait_for_marker("[PASS] desktop_online", timeout=10.0):
                 editor_failure = "Linux95 did not reach desktop before QMP input"
+            elif FILE_MANAGER_TEST:
+                mouse_position = list(wait_for_cursor(
+                    capture_screen, expected=(640, 360)))
+
+                def mouse_move(x, y):
+                    if mouse_position == [x, y]:
+                        return
+                    for dx, dy in movement_steps(mouse_position, (x, y)):
+                        result = qmp_command({
+                            "execute": "human-monitor-command",
+                            "arguments": {"command-line": f"mouse_move {dx} {dy} 0"},
+                        })["return"]
+                        if isinstance(result, str) and result.strip():
+                            raise RuntimeError(f"QEMU mouse_move failed: {result}")
+                        time.sleep(0.05)
+                    mouse_position[:] = wait_for_cursor(
+                        capture_screen, timeout=3.0, expected=(x, y))
+
+                def mouse_button(value):
+                    result = qmp_command({
+                        "execute": "human-monitor-command",
+                        "arguments": {"command-line": f"mouse_button {value}"},
+                    })["return"]
+                    if isinstance(result, str) and "unknown command" in result.lower():
+                        raise RuntimeError(f"QEMU mouse_button unavailable: {result}")
+                    if isinstance(result, str) and result.strip():
+                        print("QMP mouse_button:", result.strip())
+                    time.sleep(0.12)
+
+                def click_screen(x, y):
+                    mouse_move(x, y)
+                    mouse_button(1)
+                    mouse_button(0)
+
+                def click_toolbar(x):
+                    click_screen(250 + x, 134 + 10)
+
+                def create_folder(name):
+                    click_toolbar(10)
+                    save_stage(f"{name}-dialog")
+                    send_text(name)
+                    save_stage(f"{name}-typed")
+                    send_key("ret")
+                    save_stage(f"{name}-confirmed")
+
+                def create_file(name):
+                    click_toolbar(100)
+                    save_stage(f"{name}-dialog")
+                    (ROOT / "build" / "file-manager-create-file-open.ppm").write_bytes(capture_screen())
+                    send_text(name)
+                    save_stage(f"{name}-typed")
+                    (ROOT / "build" / "file-manager-create-file-typed.ppm").write_bytes(capture_screen())
+                    send_key("ret")
+                    save_stage(f"{name}-confirmed")
+                    (ROOT / "build" / "file-manager-create-file-confirmed.ppm").write_bytes(capture_screen())
+
+                def confirm_delete():
+                    click_toolbar(220)
+                    time.sleep(0.2)
+                    send_key("ret")
+                    time.sleep(0.2)
+
+                try:
+                    phase = "Applications button"
+                    print(f"File Manager phase: {phase}", flush=True)
+                    click_screen(60, 14)      # Applications panel button
+                    phase = "File Manager menu item"
+                    print(f"File Manager phase: {phase}", flush=True)
+                    click_screen(70, 88)      # File Manager menu item
+                    save_stage("opened")
+                    (ROOT / "build" / "file-manager-open.ppm").write_bytes(capture_screen())
+                    phase = "create FMTEST"
+                    print(f"File Manager phase: {phase}", flush=True)
+                    create_folder("fmtest")
+                    phase = "enter FMTEST"
+                    print(f"File Manager phase: {phase}", flush=True)
+                    send_key("ret")          # Enter newly selected folder.
+                    save_stage("entered-fmtest")
+
+                    phase = "create PROTECT"
+                    print(f"File Manager phase: {phase}", flush=True)
+                    create_folder("protect")
+                    phase = "enter PROTECT"
+                    print(f"File Manager phase: {phase}", flush=True)
+                    send_key("ret")
+                    save_stage("entered-protect")
+                    phase = "create CHILD.TXT"
+                    print(f"File Manager phase: {phase}", flush=True)
+                    create_file("child.txt")
+                    phase = "return to FMTEST"
+                    send_key("backspace")    # Return to FMTEST.
+                    phase = "select PROTECT"
+                    send_key("down")          # Select its only child, PROTECT.
+                    phase = "refuse PROTECT deletion"
+                    confirm_delete()          # Non-empty directory must remain.
+
+                    phase = "create EMPTYDIR"
+                    create_folder("emptydir")
+                    phase = "delete EMPTYDIR"
+                    confirm_delete()          # Empty directory must be removed.
+
+                    phase = "create TEMP.TXT"
+                    create_file("temp.txt")
+                    phase = "rename TEMP.TXT"
+                    click_toolbar(160)       # Rename the selected file.
+                    time.sleep(0.2)
+                    (ROOT / "build" / "file-manager-rename-open.ppm").write_bytes(capture_screen())
+                    for _ in range(len("temp.txt")):
+                        send_key("backspace")
+                    (ROOT / "build" / "file-manager-rename-cleared.ppm").write_bytes(capture_screen())
+                    send_text("keep.txt")
+                    (ROOT / "build" / "file-manager-rename-typed.ppm").write_bytes(capture_screen())
+                    send_key("ret")
+                    time.sleep(0.2)
+                    (ROOT / "build" / "file-manager-rename-confirmed.ppm").write_bytes(capture_screen())
+
+                    phase = "create REMOVE.TXT"
+                    create_file("remove.txt")
+                    phase = "delete REMOVE.TXT"
+                    confirm_delete()
+                    time.sleep(1.0)
+                    (ROOT / "build" / "file-manager-completed.ppm").write_bytes(capture_screen())
+                    saw_completion = True
+                    completion_seen_at = time.monotonic()
+                except (RuntimeError, OSError, ValueError) as error:
+                    editor_failure = f"QMP File Manager input failed at {phase}: {error}"
             else:
                 send_text("edit nosave.txt")
                 send_key("ret")
@@ -370,7 +542,7 @@ try:
             qmp_file.close()
         qmp.close()
 
-    while not EDITOR_TEST and time.monotonic() < deadline:
+    while not (EDITOR_TEST or FILE_MANAGER_TEST) and time.monotonic() < deadline:
         rc = proc.poll()
         if rc is not None:
             early_exit = rc
@@ -532,6 +704,15 @@ elif WITHOUT_USER_PROGRAMS:
         "[PASS] ipv4_ready",
         "[PASS] icmp_ready",
     ])
+elif FILE_MANAGER_TEST:
+    required.extend([
+        "[PASS] rtl8139_detected",
+        "[PASS] rtl8139_initialized",
+        "[PASS] ethernet_ready",
+        "[PASS] arp_ready",
+        "[PASS] ipv4_ready",
+        "[PASS] icmp_ready",
+    ])
 elif EDITOR_TEST:
     pass
 else:
@@ -684,6 +865,38 @@ if EDITOR_TEST:
     print("[PASS] editor data persisted on the same disposable Test image")
     print("[PASS] clean quit left NOSAVE.TXT absent")
     print("[PASS] Boot image remained unchanged")
+
+if FILE_MANAGER_TEST:
+    if file_manager_boot_digest is None or image_digest(IMAGE) != file_manager_boot_digest:
+        print("qemu smoke test: FAIL")
+        print("File Manager test modified the Boot image")
+        sys.exit(1)
+    if (file_manager_canonical_digest is not None and
+            image_digest(CANONICAL_STORAGE_IMAGE) != file_manager_canonical_digest):
+        print("qemu smoke test: FAIL")
+        print("canonical Test image changed during File Manager test")
+        sys.exit(1)
+    fatal_markers = ("[PANIC]", "#DF", "double fault", "triple fault", "reset")
+    if any(marker.lower() in content.lower() for marker in fatal_markers):
+        print("qemu smoke test: FAIL")
+        print("fatal kernel/QEMU diagnostic appeared during File Manager test")
+        print(content)
+        sys.exit(1)
+    from file_manager_image_checks import verify as verify_file_manager_image
+    image_errors = verify_file_manager_image(
+        STORAGE_IMAGE, IMAGE, file_manager_boot_digest)
+    if image_errors:
+        print("qemu smoke test: FAIL")
+        for error in image_errors:
+            print(f"- {error}")
+        print("--- debug log ---")
+        print(content or "(empty)")
+        sys.exit(1)
+    print("[PASS] File Manager create/rename/delete state persisted on disposable Test image")
+    print("[PASS] non-empty directory deletion was refused")
+    print("[PASS] Boot image remained byte-for-byte unchanged")
+    if file_manager_canonical_digest is not None:
+        print("[PASS] canonical Test image remained unchanged")
 
 if FAT32_WRITE_TEST:
     write_markers = required[-8:]

@@ -26,6 +26,7 @@ FAULT_TEST_IMAGE := $(BUILD)/linux95-fault-test.img
 PREEMPTION_TEST_IMAGE := $(BUILD)/linux95-preemption-test.img
 FAT32_WRITE_TEST_IMAGE := $(BUILD)/linux95-fat32-write-test.img
 FAT32_WRITE_TEST_FAT_IMAGE := $(BUILD)/linux95-fat32-write-test-fat.img
+FILE_MANAGER_TEST_FAT_IMAGE := $(BUILD)/linux95-file-manager-test-fat.img
 EDITOR_TEST_IMAGE := $(BUILD)/linux95-editor-test.img
 EDITOR_TEST_FAT_IMAGE := $(BUILD)/linux95-editor-test-fat.img
 
@@ -122,7 +123,7 @@ DNS_NETWORK_TEST_IMAGE := $(BUILD)/linux95-dns-network-test.img
 FAT32_WRITE_TEST_OBJS := $(subst $(BUILD)/fat32_write.o,$(BUILD)/fat32-write-test-writer.o,$(subst $(BUILD)/kernel.o,$(BUILD)/kernel-fat32-write-test.o,$(KERNEL_OBJS))) $(BUILD)/fat32_write_self_test.o
 EDITOR_TEST_OBJS := $(subst $(BUILD)/terminal_app.o,$(BUILD)/editor-test-terminal-app.o,$(KERNEL_OBJS))
 
-.PHONY: all clean run run-debug test test-qemu prepare-storage-test-image test-host-keyboard test-host-keyboard-queue-concurrency test-host-terminal-key-event test-host-editor-model test-host-shell-edit test-host-editor-file test-host-editor-state test-host-terminal-editor-integration test-host-segments test-host-process test-host-scheduler test-host-user-space test-host-elf test-host-elf-loader-plan test-host-syscall test-host-memory test-host-storage test-host-filesystem test-host-graphics test-host-pci test-host-rtl8139-helpers test-host-kernel-virtual-to-physical test-host-ethernet test-host-arp test-host-ipv4 test-host-icmp test-host-udp test-host-udp-bindings test-host-dns-message test-host-dns-response test-host-dns-resolver test-host-heap test-memory-source test-storage-source test-relocations check-tools test-host-file-manager-app test-host-file-manager-render
+.PHONY: all clean run run-debug test test-qemu prepare-storage-test-image prepare-file-manager-test-image test-host-keyboard test-host-keyboard-queue-concurrency test-host-terminal-key-event test-host-editor-model test-host-shell-edit test-host-editor-file test-host-editor-state test-host-terminal-editor-integration test-host-segments test-host-process test-host-scheduler test-host-user-space test-host-elf test-host-elf-loader-plan test-host-syscall test-host-memory test-host-storage test-host-filesystem test-host-graphics test-host-pci test-host-rtl8139-helpers test-host-kernel-virtual-to-physical test-host-ethernet test-host-arp test-host-ipv4 test-host-icmp test-host-udp test-host-udp-bindings test-host-dns-message test-host-dns-response test-host-dns-resolver test-host-heap test-memory-source test-storage-source test-relocations check-tools test-host-file-manager-app test-host-file-manager-render test-host-file-manager-image-checks
 .PHONY: prepare-editor-test-image
 
 all: check-tools $(BUILD)/linux95-kernel.img $(BUILD)/user/init.elf $(BUILD)/user/worker.elf $(BUILD)/editor_model.o $(BUILD)/editor_file.o
@@ -802,6 +803,9 @@ $(PREEMPTION_TEST_IMAGE): tests/prepare_fat32_image.py $(BUILD)/user/preempt_hog
 
 prepare-storage-test-image: $(STORAGE_TEST_IMAGE)
 
+prepare-file-manager-test-image: all
+>$(PYTHON) tests/prepare_fat32_image.py $(FILE_MANAGER_TEST_FAT_IMAGE) --file-manager-test
+
 $(EDITOR_TEST_FAT_IMAGE): tests/prepare_fat32_image.py $(BUILD)/user/init.elf $(BUILD)/user/worker.elf | $(BUILD)
 >$(PYTHON) tests/prepare_fat32_image.py $@ --editor-test
 
@@ -839,6 +843,8 @@ test: all test-host-memory test-host-storage test-host-heap test-host-segments t
 >$(PYTHON) tests/filesystem_source_checks.py
 >$(PYTHON) tests/filesystem_source_checks_test.py
 >$(PYTHON) tests/relocation_checks.py
+>$(PYTHON) tests/file_manager_image_checks_test.py
+>$(PYTHON) tests/qemu_cursor_test.py
 
 test-qemu: all $(NETWORK_TEST_IMAGE) $(UDP_NETWORK_TEST_IMAGE) $(DNS_NETWORK_TEST_IMAGE) prepare-storage-test-image
 >@command -v $(QEMU) >/dev/null || { echo "Missing tool: $(QEMU)"; exit 1; }
@@ -847,6 +853,7 @@ test-qemu: all $(NETWORK_TEST_IMAGE) $(UDP_NETWORK_TEST_IMAGE) $(DNS_NETWORK_TES
 >$(PYTHON) tests/qemu_smoke.py --dns-network-test
 >$(PYTHON) tests/qemu_smoke.py --without-network
 >$(PYTHON) tests/qemu_smoke.py --process-preemption-test
+>$(PYTHON) tests/qemu_smoke.py --file-manager-test
 
 run: all prepare-storage-test-image
 >$(QEMU) \
@@ -967,6 +974,9 @@ $(BUILD)/host-file-manager-render-test: tests/host/file_manager_app_test.cpp tes
 
 test-host-file-manager-render: $(BUILD)/host-file-manager-render-test
 >$(BUILD)/host-file-manager-render-test
+
+test-host-file-manager-image-checks:
+>$(PYTHON) tests/file_manager_image_checks_test.py
 
 test-host-graphics: test-host-file-manager-app test-host-file-manager-render
 
