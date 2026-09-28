@@ -21,6 +21,7 @@ struct Layout {
 
 Layout layout(graphics::Rect content, size_t entry_count, ViewMode view);
 int hit_test(graphics::Rect content, size_t entry_count, ViewMode view, int32_t x, int32_t y);
+bool format_delete_confirmation(const char* name, char* output, size_t capacity);
 
 } // namespace linux95::gui::file_manager::presentation
 
@@ -302,6 +303,18 @@ void test_entry_hit_testing_clips_and_rejects_small_or_outside_bounds()
     }
 }
 
+void test_delete_confirmation_identifies_selected_entry()
+{
+    char message[32]{};
+    assert(gui::file_manager::presentation::format_delete_confirmation(
+        "NOTES.TXT", message, sizeof(message)));
+    assert(strcmp(message, "Delete NOTES.TXT?") == 0);
+    char too_small[8]{};
+    assert(!gui::file_manager::presentation::format_delete_confirmation(
+        "NOTES.TXT", too_small, sizeof(too_small)));
+    assert(too_small[0] == '\0');
+}
+
 } // namespace
 
 int main()
@@ -318,4 +331,5 @@ int main()
     test_registration_respects_fixed_window_capacity();
     test_views_share_entries_and_selection_and_toggle_preserves_navigation();
     test_entry_hit_testing_clips_and_rejects_small_or_outside_bounds();
+    test_delete_confirmation_identifies_selected_entry();
 }

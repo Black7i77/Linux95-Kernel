@@ -71,6 +71,24 @@ struct Layout {
     graphics::Rect dialog;
 };
 
+bool format_delete_confirmation(const char* name, char* output, size_t capacity)
+{
+    if (!name || !output || capacity == 0) return false;
+    constexpr char prefix[] = "Delete ";
+    size_t name_size = 0;
+    while (name[name_size] != '\0') ++name_size;
+    constexpr size_t prefix_size = sizeof(prefix) - 1;
+    if (name_size > capacity || prefix_size + name_size + 2 > capacity) {
+        output[0] = '\0';
+        return false;
+    }
+    for (size_t i = 0; i < prefix_size; ++i) output[i] = prefix[i];
+    for (size_t i = 0; i < name_size; ++i) output[prefix_size + i] = name[i];
+    output[prefix_size + name_size] = '?';
+    output[prefix_size + name_size + 1] = '\0';
+    return true;
+}
+
 Layout layout(graphics::Rect content, size_t entry_count, ViewMode view)
 {
     (void)entry_count;
@@ -257,8 +275,16 @@ void FileManagerApp::draw(graphics::Framebuffer& framebuffer, graphics::Rect con
 
     if (dialog_mode_ != DialogMode::None) {
         fill_clipped(framebuffer, content, areas.dialog, navy);
+        char confirmation[32]{};
+        const int selected = model_.selected_index();
+        const auto* selected_entry = selected >= 0 ? model_.entry(static_cast<size_t>(selected)) : nullptr;
+        if (dialog_mode_ == DialogMode::DeleteConfirm && selected_entry &&
+            presentation::format_delete_confirmation(selected_entry->name, confirmation, sizeof(confirmation))) {
+            text_clipped(framebuffer, content, areas.dialog.x + 8, areas.dialog.y + 6, confirmation, white);
+        } else {
         text_clipped(framebuffer, content, areas.dialog.x + 8, areas.dialog.y + 6,
             dialog_mode_ == DialogMode::Name ? name_buffer_ : "Delete selected entry?", white);
+        }
         fill_clipped(framebuffer, content, graphics::Rect{content.x + 24, content.y + 58, 80, 24}, cyan);
         fill_clipped(framebuffer, content, graphics::Rect{content.x + 112, content.y + 58, 80, 24}, cyan);
         text_clipped(framebuffer, content, content.x + 36, content.y + 66, "OK / Delete", white);
