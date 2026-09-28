@@ -562,6 +562,9 @@ $(BUILD)/host-vfs-test: \
 $(BUILD)/host-vfs-name-test: tests/host/vfs_name_test.cpp kernel/filesystem/filesystem.cpp kernel/filesystem/filesystem.hpp kernel/filesystem/vfs.cpp kernel/filesystem/vfs.hpp kernel/filesystem/fat32.cpp kernel/filesystem/fat32.hpp kernel/filesystem/fat32_helpers.hpp kernel/filesystem/fat32_write.cpp kernel/filesystem/fat32_write.hpp kernel/storage/disk.cpp kernel/storage/disk.hpp kernel/storage/ata.hpp | $(BUILD)
 >$(CXX) $(HOST_CXXFLAGS) tests/host/vfs_name_test.cpp kernel/filesystem/filesystem.cpp kernel/filesystem/vfs.cpp kernel/filesystem/fat32.cpp kernel/filesystem/fat32_write.cpp kernel/storage/disk.cpp -o $@
 
+$(BUILD)/host-file-manager-model-test: tests/host/file_manager_model_test.cpp tests/host/file_manager_fake_vfs.cpp tests/host/file_manager_fake_vfs.hpp kernel/gui/file_manager_model.cpp kernel/gui/file_manager_model.hpp kernel/filesystem/vfs.hpp kernel/filesystem/filesystem.hpp | $(BUILD)
+>$(CXX) $(HOST_CXXFLAGS) tests/host/file_manager_model_test.cpp tests/host/file_manager_fake_vfs.cpp kernel/gui/file_manager_model.cpp -o $@
+
 $(BUILD)/host-filesystem-write-test: tests/host/filesystem_write_test.cpp kernel/filesystem/filesystem.cpp kernel/filesystem/filesystem.hpp kernel/filesystem/vfs.cpp kernel/filesystem/vfs.hpp kernel/filesystem/fat32.hpp kernel/filesystem/fat32_write.hpp kernel/storage/disk.cpp kernel/storage/disk.hpp | $(BUILD)
 >$(CXX) $(HOST_CXXFLAGS) tests/host/filesystem_write_test.cpp kernel/filesystem/filesystem.cpp kernel/filesystem/vfs.cpp kernel/storage/disk.cpp -o $@
 
