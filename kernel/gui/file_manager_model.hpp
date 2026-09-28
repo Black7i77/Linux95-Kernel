@@ -21,6 +21,10 @@ public:
     filesystem::Status refresh();
     filesystem::Status navigate_into(size_t entry_index);
     filesystem::Status navigate_parent();
+    filesystem::Status create_folder(const char* name);
+    filesystem::Status create_file(const char* name);
+    filesystem::Status rename_selected(const char* name);
+    filesystem::Status remove_selected();
     bool select(size_t entry_index);
     void set_view(ViewMode view);
 

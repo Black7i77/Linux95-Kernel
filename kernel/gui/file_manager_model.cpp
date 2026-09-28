@@ -28,6 +28,29 @@ bool copy_bounded(char* destination, const char* source, size_t capacity) {
     return true;
 }
 
+bool build_child_path(const char* parent, const char* name, char* destination, size_t capacity) {
+    const size_t parent_length = strlen(parent);
+    const size_t name_length = strlen(name);
+    const bool root = parent_length == 1 && parent[0] == '/';
+    const size_t separator_length = root ? 0 : 1;
+    if (parent[0] != '/' || parent_length + separator_length + name_length + 1 > capacity) return false;
+    memcpy(destination, parent, parent_length);
+    size_t offset = parent_length;
+    if (!root) destination[offset++] = '/';
+    memcpy(destination + offset, name, name_length + 1);
+    return true;
+}
+
+void select_name(FileManagerModel& model, const char* name) {
+    for (size_t i = 0; i < model.entry_count(); ++i) {
+        const filesystem::vfs::DirectoryEntry* item = model.entry(i);
+        if (item && same_name(item->name, name)) {
+            model.select(i);
+            return;
+        }
+    }
+}
+
 }
 
 FileManagerModel::FileManagerModel()
@@ -129,6 +152,62 @@ filesystem::Status FileManagerModel::navigate_parent() {
     if (length > 1) parent[length - 1] = '\0';
     else parent[1] = '\0';
     return load_path(parent);
+}
+
+filesystem::Status FileManagerModel::create_folder(const char* name) {
+    const filesystem::Status validation = filesystem::vfs::validate_name(name);
+    if (validation != filesystem::Status::Ok) return validation;
+    char destination[filesystem::vfs::kPathCapacity];
+    if (!build_child_path(path_, name, destination, sizeof(destination))) return filesystem::Status::InvalidName;
+    const filesystem::Status mutation = filesystem::vfs::mkdir(destination);
+    if (mutation != filesystem::Status::Ok) return mutation;
+    const filesystem::Status refreshed = refresh();
+    if (refreshed == filesystem::Status::Ok) select_name(*this, name);
+    return refreshed;
+}
+
+filesystem::Status FileManagerModel::create_file(const char* name) {
+    const filesystem::Status validation = filesystem::vfs::validate_name(name);
+    if (validation != filesystem::Status::Ok) return validation;
+    char destination[filesystem::vfs::kPathCapacity];
+    if (!build_child_path(path_, name, destination, sizeof(destination))) return filesystem::Status::InvalidName;
+    filesystem::vfs::FileStat existing{};
+    const filesystem::Status stat_status = filesystem::vfs::stat(destination, existing);
+    if (stat_status == filesystem::Status::Ok) return filesystem::Status::AlreadyExists;
+    if (stat_status != filesystem::Status::NotFound) return stat_status;
+    const filesystem::Status mutation = filesystem::vfs::touch(destination);
+    if (mutation != filesystem::Status::Ok) return mutation;
+    const filesystem::Status refreshed = refresh();
+    if (refreshed == filesystem::Status::Ok) select_name(*this, name);
+    return refreshed;
+}
+
+filesystem::Status FileManagerModel::rename_selected(const char* name) {
+    if (selected_index() < 0) return filesystem::Status::Unsupported;
+    const filesystem::Status validation = filesystem::vfs::validate_name(name);
+    if (validation != filesystem::Status::Ok) return validation;
+    const int selected = selected_index();
+    char source[filesystem::vfs::kPathCapacity];
+    char destination[filesystem::vfs::kPathCapacity];
+    if (!build_child_path(path_, entries_[selected].name, source, sizeof(source)) ||
+        !build_child_path(path_, name, destination, sizeof(destination))) return filesystem::Status::InvalidName;
+    if (same_name(entries_[selected].name, name)) return filesystem::Status::AlreadyExists;
+    const filesystem::Status mutation = filesystem::vfs::move(source, destination);
+    if (mutation != filesystem::Status::Ok) return mutation;
+    const filesystem::Status refreshed = refresh();
+    if (refreshed == filesystem::Status::Ok) select_name(*this, name);
+    return refreshed;
+}
+
+filesystem::Status FileManagerModel::remove_selected() {
+    const int selected = selected_index();
+    if (selected < 0) return filesystem::Status::Unsupported;
+    char target[filesystem::vfs::kPathCapacity];
+    if (!build_child_path(path_, entries_[selected].name, target, sizeof(target))) return filesystem::Status::InvalidName;
+    const filesystem::Status mutation = filesystem::vfs::remove(target);
+    if (mutation != filesystem::Status::Ok) return mutation;
+    const filesystem::Status refreshed = refresh();
+    return refreshed;
 }
 
 bool FileManagerModel::select(size_t entry_index) {

@@ -97,6 +97,89 @@ int main() {
     assert(model.refresh() == Status::Ok);
     assert(model.navigate_into(0) == Status::InvalidName);
     assert(strlen(model.current_path()) == 126);
+    const size_t bounded_mutations = file_manager_fake_vfs::mkdir_count();
+    assert(model.create_folder("A") == Status::InvalidName);
+    assert(file_manager_fake_vfs::mkdir_count() == bounded_mutations);
 
+    file_manager_fake_vfs::reset();
+    FileManagerModel operations;
+    assert(operations.load_root() == Status::Ok);
+    assert(operations.create_folder("NewDir") == Status::Ok);
+    assert(file_manager_fake_vfs::mkdir_count() == 1);
+    assert(operations.selected_index() >= 0);
+    assert(strcmp(operations.entry(operations.selected_index())->name, "NewDir") == 0);
+    assert(operations.create_file("New.TXT") == Status::Ok);
+    assert(file_manager_fake_vfs::stat_count() == 1 && file_manager_fake_vfs::touch_count() == 1);
+    assert(strcmp(operations.entry(operations.selected_index())->name, "New.TXT") == 0);
+    assert(operations.create_file("New.TXT") == Status::AlreadyExists);
+    assert(file_manager_fake_vfs::stat_count() == 2);
+    assert(file_manager_fake_vfs::touch_count() == 1);
+    assert(operations.create_folder("bad/name") == Status::InvalidName);
+    assert(file_manager_fake_vfs::mkdir_count() == 1);
+    FileManagerModel unselected;
+    assert(unselected.load_root() == Status::Ok);
+    assert(unselected.rename_selected("Ignored.TXT") == Status::Unsupported);
+    assert(file_manager_fake_vfs::move_count() == 0);
+    file_manager_fake_vfs::set_stat_error(Status::IoError);
+    assert(operations.create_file("Other.TXT") == Status::IoError);
+    assert(file_manager_fake_vfs::touch_count() == 1);
+    file_manager_fake_vfs::set_stat_error(Status::Ok);
+
+    file_manager_fake_vfs::add("/", "Old.TXT", false, 4);
+    file_manager_fake_vfs::add("/", "Folder", true, 0);
+    assert(operations.refresh() == Status::Ok);
+    int old_file = -1, old_dir = -1;
+    for (size_t i = 0; i < operations.entry_count(); ++i) {
+        if (!strcmp(operations.entry(i)->name, "Old.TXT")) old_file = static_cast<int>(i);
+        if (!strcmp(operations.entry(i)->name, "Folder")) old_dir = static_cast<int>(i);
+    }
+    assert(old_file >= 0 && operations.select(static_cast<size_t>(old_file)));
+    assert(operations.rename_selected("Renamed.TXT") == Status::Ok);
+    assert(file_manager_fake_vfs::move_count() == 1);
+    assert(strcmp(operations.entry(operations.selected_index())->name, "Renamed.TXT") == 0);
+    for (size_t i = 0; i < operations.entry_count(); ++i)
+        if (!strcmp(operations.entry(i)->name, "Folder")) old_dir = static_cast<int>(i);
+    assert(old_dir >= 0 && operations.select(static_cast<size_t>(old_dir)));
+    assert(operations.rename_selected("RenamedDir") == Status::Ok);
+    assert(operations.selected_index() >= 0);
+    assert(operations.rename_selected("New.TXT") == Status::AlreadyExists);
+    assert(operations.remove_selected() == Status::Ok);
+    assert(operations.selected_index() == -1);
+    assert(operations.remove_selected() == Status::Unsupported);
+
+    int renamed_file = -1;
+    for (size_t i = 0; i < operations.entry_count(); ++i)
+        if (!strcmp(operations.entry(i)->name, "Renamed.TXT")) renamed_file = static_cast<int>(i);
+    assert(renamed_file >= 0 && operations.select(static_cast<size_t>(renamed_file)));
+    assert(operations.remove_selected() == Status::Ok);
+    assert(file_manager_fake_vfs::remove_count() == 2);
+    int new_directory = -1;
+    for (size_t i = 0; i < operations.entry_count(); ++i)
+        if (!strcmp(operations.entry(i)->name, "NewDir")) new_directory = static_cast<int>(i);
+    assert(new_directory >= 0 && operations.select(static_cast<size_t>(new_directory)));
+    assert(operations.remove_selected() == Status::Ok);
+    assert(file_manager_fake_vfs::remove_count() == 3);
+
+    file_manager_fake_vfs::add("/", "NonEmpty", true, 0);
+    file_manager_fake_vfs::add("/NonEmpty", "Child", false, 1);
+    assert(operations.refresh() == Status::Ok);
+    int nonempty = -1;
+    for (size_t i = 0; i < operations.entry_count(); ++i)
+        if (!strcmp(operations.entry(i)->name, "NonEmpty")) nonempty = static_cast<int>(i);
+    assert(nonempty >= 0 && operations.select(static_cast<size_t>(nonempty)));
+    file_manager_fake_vfs::set_mutation_status(Status::IoError);
+    assert(operations.remove_selected() == Status::IoError);
+    assert(operations.selected_index() == nonempty);
+    assert(operations.entry_count() > static_cast<size_t>(nonempty));
+    file_manager_fake_vfs::set_mutation_status(Status::Ok);
+    assert(operations.remove_selected() == Status::DirectoryNotEmpty);
+    assert(operations.selected_index() == nonempty);
+
+    file_manager_fake_vfs::set_mutation_status(Status::IoError);
+    assert(operations.create_folder("Failed") == Status::IoError);
+    assert(operations.selected_index() == nonempty);
+    file_manager_fake_vfs::set_mutation_status(Status::Ok);
+    assert(operations.select(0));
+    assert(operations.remove_selected() == Status::Ok);
     return 0;
 }

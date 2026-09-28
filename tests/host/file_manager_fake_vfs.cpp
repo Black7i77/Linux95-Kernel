@@ -20,6 +20,9 @@ size_t read_count;
 size_t closes;
 size_t validations;
 bool handle_open;
+Status mutation_status;
+Status stat_error;
+size_t stats, touches, mkdirs, moves, removes;
 
 void copy(char* to, const char* from, size_t capacity) {
     size_t i = 0;
@@ -88,6 +91,116 @@ Status closedir(int handle) {
     ++closes;
     return close_status;
 }
+
+Status stat(const char* path, FileStat& result) {
+    ++stats;
+    if (stat_error != Status::Ok) return stat_error;
+    for (size_t i = 0; i < item_count; ++i) {
+        char full[kPathCapacity];
+        const size_t parent = strlen(items[i].directory);
+        const bool root = parent == 1 && items[i].directory[0] == '/';
+        size_t offset = parent;
+        memcpy(full, items[i].directory, parent);
+        if (!root) full[offset++] = '/';
+        const size_t length = strlen(items[i].entry.name);
+        memcpy(full + offset, items[i].entry.name, length + 1);
+        if (strcasecmp(full, path) == 0) {
+            result.is_directory = items[i].entry.is_directory;
+            result.size = items[i].entry.size;
+            return Status::Ok;
+        }
+    }
+    return Status::NotFound;
+}
+
+Status touch(const char* path) {
+    ++touches;
+    if (mutation_status != Status::Ok) return mutation_status;
+    for (size_t i = 0; i < item_count; ++i) {
+        char full[kPathCapacity];
+        const size_t parent_length = strlen(items[i].directory);
+        const bool root = parent_length == 1 && items[i].directory[0] == '/';
+        size_t offset = parent_length;
+        memcpy(full, items[i].directory, parent_length);
+        if (!root) full[offset++] = '/';
+        const size_t name_length = strlen(items[i].entry.name);
+        memcpy(full + offset, items[i].entry.name, name_length + 1);
+        if (strcasecmp(full, path) == 0)
+            return items[i].entry.is_directory ? Status::IsDirectory : Status::Ok;
+    }
+    char parent[kPathCapacity]; copy(parent, path, sizeof(parent));
+    char* slash = strrchr(parent, '/'); if (!slash) return Status::InvalidName;
+    char name[13]; copy(name, slash + 1, sizeof(name));
+    if (slash == parent) slash[1] = '\0'; else *slash = '\0';
+    file_manager_fake_vfs::add(parent, name, false, 0);
+    return Status::Ok;
+}
+
+Status mkdir(const char* path) {
+    ++mkdirs;
+    if (mutation_status != Status::Ok) return mutation_status;
+    for (size_t i = 0; i < item_count; ++i) {
+        char full[kPathCapacity];
+        const size_t parent_length = strlen(items[i].directory);
+        const bool root = parent_length == 1 && items[i].directory[0] == '/';
+        size_t offset = parent_length;
+        memcpy(full, items[i].directory, parent_length);
+        if (!root) full[offset++] = '/';
+        const size_t name_length = strlen(items[i].entry.name);
+        memcpy(full + offset, items[i].entry.name, name_length + 1);
+        if (strcasecmp(full, path) == 0) return Status::AlreadyExists;
+    }
+    char parent[kPathCapacity]; copy(parent, path, sizeof(parent));
+    char* slash = strrchr(parent, '/'); if (!slash) return Status::InvalidName;
+    char name[13]; copy(name, slash + 1, sizeof(name));
+    if (slash == parent) slash[1] = '\0'; else *slash = '\0';
+    file_manager_fake_vfs::add(parent, name, true, 0);
+    return Status::Ok;
+}
+
+Status move(const char* from, const char* to) {
+    ++moves;
+    if (mutation_status != Status::Ok) return mutation_status;
+    char old_parent[kPathCapacity], new_parent[kPathCapacity];
+    copy(old_parent, from, sizeof(old_parent)); copy(new_parent, to, sizeof(new_parent));
+    char *old_slash = strrchr(old_parent, '/'), *new_slash = strrchr(new_parent, '/');
+    if (!old_slash || !new_slash) return Status::InvalidName;
+    char old_name[13], new_name[13];
+    copy(old_name, old_slash + 1, sizeof(old_name)); copy(new_name, new_slash + 1, sizeof(new_name));
+    if (old_slash == old_parent) old_slash[1] = '\0'; else *old_slash = '\0';
+    if (new_slash == new_parent) new_slash[1] = '\0'; else *new_slash = '\0';
+    if (strcasecmp(old_parent, new_parent) != 0) return Status::Unsupported;
+    for (size_t i = 0; i < item_count; ++i) {
+        if (!strcmp(items[i].directory, old_parent) && !strcasecmp(items[i].entry.name, old_name)) {
+            for (size_t j = 0; j < item_count; ++j)
+                if (!strcmp(items[j].directory, new_parent) && !strcasecmp(items[j].entry.name, new_name))
+                    return Status::AlreadyExists;
+            copy(items[i].entry.name, new_name, sizeof(items[i].entry.name));
+            return Status::Ok;
+        }
+    }
+    return Status::NotFound;
+}
+
+Status remove(const char* path) {
+    ++removes;
+    if (mutation_status != Status::Ok) return mutation_status;
+    char parent[kPathCapacity]; copy(parent, path, sizeof(parent));
+    char* slash = strrchr(parent, '/'); if (!slash) return Status::InvalidName;
+    char name[13]; copy(name, slash + 1, sizeof(name));
+    if (slash == parent) slash[1] = '\0'; else *slash = '\0';
+    for (size_t i = 0; i < item_count; ++i) {
+        if (!strcmp(items[i].directory, parent) && !strcasecmp(items[i].entry.name, name)) {
+            if (items[i].entry.is_directory)
+                for (size_t j = 0; j < item_count; ++j)
+                    if (!strcmp(items[j].directory, path)) return Status::DirectoryNotEmpty;
+            for (size_t j = i + 1; j < item_count; ++j) items[j - 1] = items[j];
+            --item_count;
+            return Status::Ok;
+        }
+    }
+    return Status::NotFound;
+}
 }
 
 namespace file_manager_fake_vfs {
@@ -98,6 +211,8 @@ void reset() {
     close_status = linux95::filesystem::Status::Ok;
     read_count = closes = validations = 0; handle_open = false; opened_path[0] = '\0';
     injected_open_path[0] = '\0';
+    mutation_status = stat_error = linux95::filesystem::Status::Ok;
+    stats = touches = mkdirs = moves = removes = 0;
 }
 void add(const char* directory, const char* name, bool is_directory, uint32_t size) {
     for (size_t i = 0; i < linux95::filesystem::vfs::item_count; ++i) {
@@ -121,4 +236,11 @@ void set_read_error_after(size_t entries, linux95::filesystem::Status status) { 
 void set_close_status(linux95::filesystem::Status status) { close_status = status; }
 size_t close_count() { return closes; }
 size_t validate_count() { return validations; }
+size_t stat_count() { return stats; }
+size_t touch_count() { return touches; }
+size_t mkdir_count() { return mkdirs; }
+size_t move_count() { return moves; }
+size_t remove_count() { return removes; }
+void set_mutation_status(linux95::filesystem::Status status) { mutation_status = status; }
+void set_stat_error(linux95::filesystem::Status status) { stat_error = status; }
 }
