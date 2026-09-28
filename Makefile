@@ -845,6 +845,7 @@ test: all test-host-memory test-host-storage test-host-heap test-host-segments t
 >$(PYTHON) tests/relocation_checks.py
 >$(PYTHON) tests/file_manager_image_checks_test.py
 >$(PYTHON) tests/qemu_cursor_test.py
+>$(PYTHON) tests/file_manager_screen_checks_test.py
 
 test-qemu: all $(NETWORK_TEST_IMAGE) $(UDP_NETWORK_TEST_IMAGE) $(DNS_NETWORK_TEST_IMAGE) prepare-storage-test-image
 >@command -v $(QEMU) >/dev/null || { echo "Missing tool: $(QEMU)"; exit 1; }

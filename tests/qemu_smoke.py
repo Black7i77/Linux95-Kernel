@@ -12,6 +12,7 @@ import threading
 import time
 
 from qemu_smoke_policy import grace_complete
+from file_manager_screen_checks import wait_for_text
 from qemu_cursor import locate_cursor, movement_steps, wait_for_cursor
 
 WITHOUT_NETWORK = "--without-network" in sys.argv[1:]
@@ -377,6 +378,17 @@ try:
                 time.sleep(delay)
                 (ROOT / "build" / f"file-manager-stage-{name}.ppm").write_bytes(capture_screen())
 
+            def require_screen_text(text, present=True, foreground=None, region=None):
+                if not wait_for_text(capture_screen, text, present=present,
+                                     timeout=4.0, foreground=foreground,
+                                     region=region):
+                    state = "visible" if present else "absent"
+                    raise RuntimeError(f"File Manager UI did not show {text!r} {state}")
+
+            status_region = (250, 560, 1010, 590)
+            dialog_text_region = (250, 184, 1010, 228)
+            entries_region = (250, 220, 1010, 550)
+
             if not wait_for_marker("[PASS] desktop_online", timeout=10.0):
                 editor_failure = "Linux95 did not reach desktop before QMP input"
             elif FILE_MANAGER_TEST:
@@ -413,33 +425,42 @@ try:
                     mouse_button(1)
                     mouse_button(0)
 
-                def click_toolbar(x):
-                    click_screen(250 + x, 134 + 10)
-
                 def create_folder(name):
-                    click_toolbar(10)
+                    send_key("ctrl-n")
+                    require_screen_text("new folder name", region=status_region)
                     save_stage(f"{name}-dialog")
                     send_text(name)
+                    require_screen_text(name, region=dialog_text_region)
                     save_stage(f"{name}-typed")
                     send_key("ret")
+                    require_screen_text(name.upper(), region=entries_region)
                     save_stage(f"{name}-confirmed")
 
                 def create_file(name):
-                    click_toolbar(100)
+                    send_key("ctrl-f")
+                    require_screen_text("new file name", region=status_region)
                     save_stage(f"{name}-dialog")
                     (ROOT / "build" / "file-manager-create-file-open.ppm").write_bytes(capture_screen())
                     send_text(name)
+                    require_screen_text(name, region=dialog_text_region)
                     save_stage(f"{name}-typed")
                     (ROOT / "build" / "file-manager-create-file-typed.ppm").write_bytes(capture_screen())
                     send_key("ret")
+                    require_screen_text(name.split(".", 1)[0].upper(),
+                                        region=entries_region)
                     save_stage(f"{name}-confirmed")
                     (ROOT / "build" / "file-manager-create-file-confirmed.ppm").write_bytes(capture_screen())
 
-                def confirm_delete():
-                    click_toolbar(220)
-                    time.sleep(0.2)
+                def confirm_delete(target, expect_error=None):
+                    send_key("delete")
+                    require_screen_text(f"Delete {target}?",
+                                        region=dialog_text_region)
                     send_key("ret")
-                    time.sleep(0.2)
+                    if expect_error:
+                        require_screen_text(expect_error, region=status_region)
+                    else:
+                        require_screen_text(target.split(".", 1)[0], present=False,
+                                            region=entries_region)
 
                 try:
                     phase = "Applications button"
@@ -473,18 +494,19 @@ try:
                     phase = "select PROTECT"
                     send_key("down")          # Select its only child, PROTECT.
                     phase = "refuse PROTECT deletion"
-                    confirm_delete()          # Non-empty directory must remain.
+                    confirm_delete("PROTECT", "delete: directory is not empty")
+                    require_screen_text("PROTECT", region=entries_region)
 
                     phase = "create EMPTYDIR"
                     create_folder("emptydir")
                     phase = "delete EMPTYDIR"
-                    confirm_delete()          # Empty directory must be removed.
+                    confirm_delete("EMPTYDIR")
 
                     phase = "create TEMP.TXT"
                     create_file("temp.txt")
                     phase = "rename TEMP.TXT"
-                    click_toolbar(160)       # Rename the selected file.
-                    time.sleep(0.2)
+                    send_key("ctrl-r")      # Rename the selected file.
+                    require_screen_text("rename entry", region=status_region)
                     (ROOT / "build" / "file-manager-rename-open.ppm").write_bytes(capture_screen())
                     for _ in range(len("temp.txt")):
                         send_key("backspace")
@@ -498,7 +520,7 @@ try:
                     phase = "create REMOVE.TXT"
                     create_file("remove.txt")
                     phase = "delete REMOVE.TXT"
-                    confirm_delete()
+                    confirm_delete("REMOVE.TXT")
                     time.sleep(1.0)
                     (ROOT / "build" / "file-manager-completed.ppm").write_bytes(capture_screen())
                     saw_completion = True
