@@ -6,6 +6,7 @@
 #include "arch/mouse.hpp"
 #include "arch/pit.hpp"
 #include "gui/system_info_app.hpp"
+#include "gui/file_manager_app.hpp"
 #include "gui/terminal_app.hpp"
 #include "net/network.hpp"
 #include "net/dns.hpp"
@@ -55,6 +56,7 @@ constexpr int32_t kTaskButtonHeight = 24;
 
 constexpr int32_t kMenuWidth = 180;
 constexpr int32_t kMenuItemHeight = 24;
+constexpr size_t kMenuItemCount = 3;
 
 graphics::Rect to_graphics(
     gui::Rect rect)
@@ -172,7 +174,7 @@ gui::Rect menu_bounds()
         0,
         kPanelHeight,
         kMenuWidth,
-        kMenuItemHeight * 2,
+        kMenuItemHeight * kMenuItemCount,
     };
 }
 
@@ -244,9 +246,11 @@ struct RuntimeState {
 
     gui::TerminalApp terminal_app;
     gui::SystemInfoApp system_info_app;
+    gui::file_manager::FileManagerApp file_manager_app;
 
     gui::AppInstance terminal;
     gui::AppInstance system_info;
+    gui::AppInstance file_manager;
 
     DirtyRegionQueue dirty;
 
@@ -274,10 +278,13 @@ struct RuntimeState {
           windows(),
           terminal_app(),
           system_info_app(),
+          file_manager_app(),
           terminal(
               terminal_app.instance()),
           system_info(
               system_info_app.instance()),
+          file_manager(
+              file_manager_app.instance()),
           dirty(),
           mouse_position{
               kScreenWidth / 2,
@@ -306,6 +313,10 @@ gui::AppInstance* app_for(
         return &state.system_info;
     }
 
+    if (id == kFileManagerWindowId) {
+        return &state.file_manager;
+    }
+
     return nullptr;
 }
 
@@ -320,6 +331,10 @@ const char* title_for(
         id ==
         kSystemInfoWindowId) {
         return "System Info";
+    }
+
+    if (id == kFileManagerWindowId) {
+        return "File Manager";
     }
 
     return "Linux95";
@@ -388,6 +403,7 @@ bool activate_runtime_window(
     RuntimeState& state,
     gui::WindowId id)
 {
+    const bool is_new = state.windows.find(id) == nullptr;
     const gui::WindowId old_focus =
         state.windows.focused();
 
@@ -400,6 +416,10 @@ bool activate_runtime_window(
             state.windows,
             id)) {
         return false;
+    }
+
+    if (is_new && id == kFileManagerWindowId) {
+        state.file_manager_app.open();
     }
 
     invalidate_window(
@@ -647,6 +667,16 @@ void draw_panel(
                 task_slot++);
         }
 
+        if (
+            state.windows.find(
+                kFileManagerWindowId) !=
+            nullptr) {
+            draw_task_button(
+                state,
+                kFileManagerWindowId,
+                task_slot);
+        }
+
         char uptime[21];
 
         format_u64(
@@ -728,6 +758,20 @@ void draw_panel(
         menu.y +
             kMenuItemHeight + 8,
         "System Info",
+        kBlack);
+
+    graphics::draw_line(
+        state.framebuffer,
+        menu.x,
+        menu.y + kMenuItemHeight * 2,
+        menu.x + menu.width - 1,
+        menu.y + kMenuItemHeight * 2,
+        kPanelDark);
+    graphics::draw_text(
+        state.framebuffer,
+        menu.x + 8,
+        menu.y + kMenuItemHeight * 2 + 8,
+        "File Manager",
         kBlack);
 }
 
@@ -1038,6 +1082,20 @@ gui::WindowId task_window_at(
                 point)) {
             return kSystemInfoWindowId;
         }
+
+        ++slot;
+    }
+
+    if (
+        state.windows.find(
+            kFileManagerWindowId) !=
+        nullptr) {
+        if (
+            gui::contains(
+                task_button_bounds(slot),
+                point)) {
+            return kFileManagerWindowId;
+        }
     }
 
     return 0;
@@ -1058,12 +1116,14 @@ bool handle_panel_or_menu_click(
             gui::contains(
                 menu,
                 point)) {
+            const int32_t item =
+                (point.y - menu.y) / kMenuItemHeight;
             const gui::WindowId id =
-                point.y <
-                    menu.y +
-                        kMenuItemHeight
+                item == 0
                     ? kTerminalWindowId
-                    : kSystemInfoWindowId;
+                    : item == 1
+                        ? kSystemInfoWindowId
+                        : kFileManagerWindowId;
 
             state.menu_open = false;
 
@@ -1409,9 +1469,10 @@ void process_keyboard(
                 state.windows,
                 state.terminal,
                 state.system_info,
+                state.file_manager,
                 event) &&
-            focused ==
-                kTerminalWindowId) {
+            (focused == kTerminalWindowId ||
+             focused == kFileManagerWindowId)) {
             invalidate_window(
                 state,
                 focused);
@@ -1508,6 +1569,16 @@ gui::Rect system_info_default_bounds()
     };
 }
 
+gui::Rect file_manager_default_bounds()
+{
+    return gui::Rect{
+        250,
+        110,
+        760,
+        480,
+    };
+}
+
 bool initialize_default_windows(
     gui::WindowManager& windows)
 {
@@ -1566,6 +1637,8 @@ bool activate_window(
         kSystemInfoWindowId) {
         bounds =
             system_info_default_bounds();
+    } else if (id == kFileManagerWindowId) {
+        bounds = file_manager_default_bounds();
     } else {
         return false;
     }
@@ -1586,6 +1659,22 @@ bool route_key(
     const gui::WindowManager& windows,
     gui::AppInstance& terminal,
     gui::AppInstance& system_info,
+    const keyboard::KeyEvent& event)
+{
+    gui::AppInstance file_manager{nullptr, gui::AppCallbacks{}};
+    return route_key(
+        windows,
+        terminal,
+        system_info,
+        file_manager,
+        event);
+}
+
+bool route_key(
+    const gui::WindowManager& windows,
+    gui::AppInstance& terminal,
+    gui::AppInstance& system_info,
+    gui::AppInstance& file_manager,
     const keyboard::KeyEvent& event)
 {
     const gui::WindowId focused =
@@ -1609,6 +1698,8 @@ bool route_key(
         focused ==
         kSystemInfoWindowId) {
         app = &system_info;
+    } else if (focused == kFileManagerWindowId) {
+        app = &file_manager;
     } else {
         return false;
     }
