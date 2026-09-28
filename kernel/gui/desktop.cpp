@@ -964,46 +964,9 @@ void redraw_region(
     }
 
     // 2. Open windows in ascending z order.
-    const gui::Window* ordered[2];
-    size_t ordered_count = 0;
-
-    const gui::Window* terminal =
-        state.windows.find(
-            kTerminalWindowId);
-
-    if (
-        terminal != nullptr &&
-        terminal->state ==
-            gui::WindowState::Open) {
-        ordered[ordered_count++] =
-            terminal;
-    }
-
-    const gui::Window* system_info =
-        state.windows.find(
-            kSystemInfoWindowId);
-
-    if (
-        system_info != nullptr &&
-        system_info->state ==
-            gui::WindowState::Open) {
-        ordered[ordered_count++] =
-            system_info;
-    }
-
-    if (
-        ordered_count == 2 &&
-        ordered[0]->z >
-            ordered[1]->z) {
-        const gui::Window* temp =
-            ordered[0];
-
-        ordered[0] =
-            ordered[1];
-
-        ordered[1] =
-            temp;
-    }
+    const gui::Window* ordered[gui::WindowManager::kMaxWindows];
+    const size_t ordered_count = state.windows.open_windows_in_z_order(
+        ordered, gui::WindowManager::kMaxWindows);
 
     for (
         size_t i = 0;

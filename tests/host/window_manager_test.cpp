@@ -323,6 +323,31 @@ void test_capacity_is_eight_windows()
             true));
 }
 
+void test_all_open_windows_are_available_in_draw_order()
+{
+    WindowManager manager;
+    for (WindowId id = 1; id <= 3; ++id) {
+        assert(manager.add_window(id, Rect{100, 100, 300, 200}, true, true));
+    }
+
+    const Window* ordered[WindowManager::kMaxWindows]{};
+    assert(manager.open_windows_in_z_order(ordered, WindowManager::kMaxWindows) == 3);
+    assert(ordered[0]->id == 1);
+    assert(ordered[1]->id == 2);
+    assert(ordered[2]->id == 3);
+
+    assert(manager.focus(1));
+    assert(manager.open_windows_in_z_order(ordered, WindowManager::kMaxWindows) == 3);
+    assert(ordered[0]->id == 2);
+    assert(ordered[1]->id == 3);
+    assert(ordered[2]->id == 1);
+
+    assert(manager.minimize(2));
+    assert(manager.open_windows_in_z_order(ordered, WindowManager::kMaxWindows) == 2);
+    assert(ordered[0]->id == 3);
+    assert(ordered[1]->id == 1);
+}
+
 } // namespace
 
 int main()
@@ -339,6 +364,7 @@ int main()
     test_non_resizable_window_rejects_resize();
     test_non_closable_window_rejects_close();
     test_capacity_is_eight_windows();
+    test_all_open_windows_are_available_in_draw_order();
 
     return 0;
 }

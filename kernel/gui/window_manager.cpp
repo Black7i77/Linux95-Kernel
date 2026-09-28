@@ -114,6 +114,39 @@ const Window* WindowManager::find(
     return nullptr;
 }
 
+size_t WindowManager::open_windows_in_z_order(
+    const Window** output,
+    size_t capacity) const
+{
+    if (output == nullptr) {
+        return 0;
+    }
+
+    size_t count = 0;
+    for (size_t i = 0; i < kMaxWindows; ++i) {
+        const Window& candidate = windows_[i];
+        if (candidate.state != WindowState::Open) {
+            continue;
+        }
+
+        size_t position = 0;
+        while (position < count && output[position]->z <= candidate.z) {
+            ++position;
+        }
+        if (position >= capacity) {
+            continue;
+        }
+        if (count < capacity) {
+            ++count;
+        }
+        for (size_t j = count - 1; j > position; --j) {
+            output[j] = output[j - 1];
+        }
+        output[position] = &candidate;
+    }
+    return count;
+}
+
 void WindowManager::compact_z()
 {
     uint8_t next_z = 0;
