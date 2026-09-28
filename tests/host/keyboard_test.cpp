@@ -84,6 +84,28 @@ static void test_extended_arrows_and_breaks()
     assert(!decoder.feed(0x2A, event)); // modifier alone is never an event
 }
 
+static void test_escape_and_delete_make_break_events()
+{
+    Set1Decoder decoder;
+    KeyEvent event{};
+
+    event = decode(decoder, 0x01); // Escape make
+    assert(event.key == KeyCode::Escape && event.pressed);
+    assert(event.character == 0 && !event.ctrl && !event.shift);
+    event = decode(decoder, 0x81); // Escape break
+    assert(event.key == KeyCode::Escape && !event.pressed);
+
+    assert(!decoder.feed(0xE0, event)); // Delete's E0 prefix is not an event
+    event = decode(decoder, 0x53); // Delete make
+    assert(event.key == KeyCode::Delete && event.pressed);
+    assert(event.character == 0 && !event.ctrl && !event.shift);
+    assert(!decoder.feed(0xE0, event)); // Delete break prefix is not an event
+    event = decode(decoder, 0xD3); // Delete break
+    assert(event.key == KeyCode::Delete && !event.pressed);
+
+    assert(!decoder.feed(0xE0, event)); // Prefix by itself never emits
+}
+
 static void test_queue_drops_newest()
 {
     EventQueue queue;
@@ -125,6 +147,7 @@ int main()
     test_character_shift_and_punctuation();
     test_independent_shift_and_control_modifiers();
     test_extended_arrows_and_breaks();
+    test_escape_and_delete_make_break_events();
     test_queue_drops_newest();
     test_modifiers_update_when_queue_is_full();
     return 0;
